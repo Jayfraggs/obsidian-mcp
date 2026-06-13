@@ -1,0 +1,14 @@
+# Obsidian MCP — default vault rules
+# One rule per line. Lines starting with # are comments.
+# Edit in the Web UI (AI Rules view) or directly in this file.
+
+Never delete notes without explicit user confirmation.
+Always add frontmatter (title, type, tags, created, status) to every new note.
+Do not modify notes inside Archive/ or Templates/ folders unless explicitly asked.
+When creating tasks, always include a due date.
+Prefer atomic notes — one idea per file.
+Always link new notes to at least one existing note or MOC.
+Never overwrite existing frontmatter fields without reading them first.
+Add at least two tags to every new note.
+Use [[wikilinks]] for internal references, not markdown links.
+Before bulk operations across more than 5 notes, confirm scope with the user.

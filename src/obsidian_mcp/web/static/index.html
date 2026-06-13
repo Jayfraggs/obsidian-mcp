@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Obsidian MCP</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Obsidian <span>MCP</span></h1>
+  <p id="server-status">Loading…</p>
+  <div class="topbar-right">
+    <div class="profile-chip">
+      <span>Profile</span>
+      <select id="profile">
+        <option value="read_only">Read only</option>
+        <option value="safe_write">Safe write</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" aria-label="Primary">
+    <span class="sidebar-section">Vault</span>
+    <button class="nav-btn active" data-view="notes"><span class="icon">📄</span>Notes</button>
+    <button class="nav-btn" data-view="search"><span class="icon">🔍</span>Search</button>
+
+    <span class="sidebar-section">Knowledge</span>
+    <button class="nav-btn" data-view="knowledge"><span class="icon">🧠</span>Knowledge</button>
+    <button class="nav-btn" data-view="graph"><span class="icon">🕸️</span>Graph</button>
+
+    <span class="sidebar-section">Plugins</span>
+    <button class="nav-btn" data-view="dataview"><span class="icon">📊</span>Dataview</button>
+    <button class="nav-btn" data-view="tasks"><span class="icon">✅</span>Tasks</button>
+    <button class="nav-btn" data-view="templater"><span class="icon">🧩</span>Templater</button>
+    <button class="nav-btn" data-view="excalidraw"><span class="icon">🎨</span>Excalidraw</button>
+    <button class="nav-btn" data-view="omnisearch"><span class="icon">🔎</span>Omnisearch</button>
+
+    <span class="sidebar-section">System</span>
+    <button class="nav-btn" data-view="rules"><span class="icon">📋</span>AI Rules</button>
+    <button class="nav-btn" data-view="docs"><span class="icon">📖</span>Docs</button>
+    <button class="nav-btn" data-view="permissions"><span class="icon">🔐</span>Permissions</button>
+    <button class="nav-btn" data-view="settings"><span class="icon">⚙️</span>Settings</button>
+  </nav>
+
+  <main>
+
+    <!-- ══ NOTES ══════════════════════════════════════════════════════ -->
+    <section id="view-notes" class="view active">
+      <div class="view-header">
+        <h2>Notes</h2>
+        <p>Browse, read, and edit markdown notes in your vault.</p>
+      </div>
+      <div class="two-col">
+        <div>
+          <div class="btn-row" style="margin-bottom:10px">
+            <button id="refresh-notes" class="btn-sm">↻ Refresh</button>
+          </div>
+          <ul class="notes-list" id="notes-list"></ul>
+        </div>
+        <div>
+          <div class="card">
+            <div class="field">
+              <label>Path</label>
+              <input id="note-path" placeholder="Folder/Note.md">
+            </div>
+            <div class="field">
+              <label>Content</label>
+              <textarea id="note-content" rows="18"></textarea>
+            </div>
+            <div class="btn-row">
+              <button id="save-note" class="btn-primary">Save</button>
+              <button id="clear-note" class="btn-sm">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SEARCH ═════════════════════════════════════════════════════ -->
+    <section id="view-search" class="view">
+      <div class="view-header"><h2>Search</h2><p>Fuzzy full-text search across the vault.</p></div>
+      <div class="card">
+        <div class="input-row">
+          <input id="search-query" placeholder="Search notes…">
+          <button id="search-btn" class="btn-primary">Search</button>
+        </div>
+      </div>
+      <div id="search-results"></div>
+    </section>
+
+    <!-- ══ KNOWLEDGE ══════════════════════════════════════════════════ -->
+    <section id="view-knowledge" class="view">
+      <div class="view-header"><h2>Knowledge</h2><p>MOCs, atomic notes, and structural tools.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="moc">Build MOC</button>
+        <button class="tab-btn" data-tab="atomic">Atomic Note</button>
+      </div>
+      <div class="tab-panel active" id="tab-moc">
+        <div class="card">
+          <div class="card-title">Build Map of Content</div>
+          <div class="field"><label>Topic</label><input id="moc-topic" placeholder="e.g. Home Automation"></div>
+          <div class="field"><label>Output path (optional)</label><input id="moc-path" placeholder="MOCs/Home Automation"></div>
+          <button class="btn-primary" id="moc-btn">Build MOC</button>
+        </div>
+      </div>
+      <div class="tab-panel" id="tab-atomic">
+        <div class="card">
+          <div class="card-title">Create Atomic Note</div>
+          <div class="field"><label>Path</label><input id="atomic-path" placeholder="Concepts/My Concept"></div>
+          <div class="field"><label>Title</label><input id="atomic-title"></div>
+          <div class="field"><label>Content</label><textarea id="atomic-content" rows="6"></textarea></div>
+          <div class="field"><label>Tags (comma-separated)</label><input id="atomic-tags"></div>
+          <button class="btn-primary" id="atomic-btn">Create note</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ GRAPH ══════════════════════════════════════════════════════ -->
+    <section id="view-graph" class="view">
+      <div class="view-header"><h2>Relationship Graph</h2><p>Link structure across the vault.</p></div>
+      <div class="btn-row" style="margin-bottom:14px">
+        <button class="btn-primary" id="load-graph">Load graph</button>
+      </div>
+      <pre id="graph-output" style="max-height:520px"></pre>
+    </section>
+
+    <!-- ══ DATAVIEW ════════════════════════════════════════════════════ -->
+    <section id="view-dataview" class="view">
+      <div class="view-header"><h2>Dataview</h2><p>Generate queries, dashboards, and inspect inline fields.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="dv-dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="dv-fields">Fields</button>
+        <button class="tab-btn" data-tab="dv-query">Query builder</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-dv-dashboard">
+        <div class="card">
+          <div class="card-title">Build Dashboard note</div>
+          <div class="two-col">
+            <div>
+              <div class="field"><label>Output path</label><input id="dv-dash-path" placeholder="Dashboards/Home"></div>
+              <div class="field"><label>Title</label><input id="dv-dash-title" placeholder="Home Dashboard"></div>
+              <div class="field"><label>Tags filter (comma-separated)</label><input id="dv-dash-tags" placeholder="project, area"></div>
+              <div class="field"><label>Folders scope (comma-separated)</label><input id="dv-dash-folders" placeholder="Projects, Areas"></div>
+              <div style="display:flex;gap:12px;margin-bottom:12px;font-size:13px">
+                <label style="flex-direction:row;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="dv-inc-tasks" checked style="width:auto"> Tasks</label>
+                <label style="flex-direction:row;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="dv-inc-recent" checked style="width:auto"> Recent</label>
+                <label style="flex-direction:row;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="dv-inc-stats" checked style="width:auto"> Stats</label>
+              </div>
+              <button class="btn-primary" id="dv-dash-btn">Create dashboard</button>
+            </div>
+            <div id="dv-dash-preview" class="query-block" style="min-height:140px;color:var(--muted);font-size:12px">Dashboard preview will appear here after creation.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-dv-fields">
+        <div class="card">
+          <div class="card-title">Inspect Dataview fields</div>
+          <div class="input-row">
+            <input id="dv-fields-path" placeholder="Path to note…">
+            <button class="btn-primary" id="dv-fields-btn">Inspect</button>
+          </div>
+          <pre id="dv-fields-output" style="margin-top:10px;max-height:320px"></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-dv-query">
+        <div class="card">
+          <div class="card-title">TABLE query builder</div>
+          <div class="field"><label>Fields (comma-separated)</label><input id="dv-q-fields" placeholder="status, priority, file.mtime"></div>
+          <div class="field"><label>From folder (optional)</label><input id="dv-q-folder" placeholder="Projects"></div>
+          <div class="field"><label>WHERE clause (optional)</label><input id="dv-q-where" placeholder='status != "done"'></div>
+          <div class="field"><label>SORT (optional)</label><input id="dv-q-sort" placeholder="priority DESC"></div>
+          <button class="btn-primary" id="dv-q-btn">Generate query</button>
+          <div id="dv-q-output" class="query-block" style="margin-top:12px;display:none"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">TASK query builder</div>
+          <div class="field"><label>From folder (optional)</label><input id="dv-tq-folder" placeholder="Projects"></div>
+          <div class="field"><label>WHERE clause</label><input id="dv-tq-where" value="!completed"></div>
+          <button class="btn-primary" id="dv-tq-btn">Generate query</button>
+          <div id="dv-tq-output" class="query-block" style="margin-top:12px;display:none"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TASKS ══════════════════════════════════════════════════════ -->
+    <section id="view-tasks" class="view">
+      <div class="view-header"><h2>Tasks</h2><p>Create, browse, and complete Tasks-plugin formatted tasks.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tasks-browse">Browse</button>
+        <button class="tab-btn" data-tab="tasks-create">Create task</button>
+        <button class="tab-btn" data-tab="tasks-note">Task note</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-tasks-browse">
+        <div class="card">
+          <div class="two-col" style="align-items:flex-end;gap:8px;margin-bottom:12px">
+            <div class="field" style="margin:0"><label>Filter by state</label>
+              <select id="tasks-state-filter">
+                <option value="open">Open</option>
+                <option value="done">Done</option>
+                <option value="in_progress">In progress</option>
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="field" style="margin:0"><label>Priority</label>
+              <select id="tasks-priority-filter">
+                <option value="">Any</option>
+                <option value="highest">Highest</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <button class="btn-primary" id="tasks-load-btn">Load tasks</button>
+          </div>
+          <div id="tasks-list" style="border:1px solid var(--border);border-radius:var(--radius)">
+            <div class="empty">Press "Load tasks" to aggregate across vault.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-tasks-create">
+        <div class="card">
+          <div class="card-title">Add task to a note</div>
+          <div class="field"><label>Note path</label><input id="tc-path" placeholder="Projects/AI.md"></div>
+          <div class="field"><label>Task description</label><input id="tc-text" placeholder="Build the routing layer"></div>
+          <div class="three-col">
+            <div class="field"><label>Due date</label><input id="tc-due" type="date"></div>
+            <div class="field"><label>Priority</label>
+              <select id="tc-priority">
+                <option value="">None</option>
+                <option value="highest">Highest ⏫</option>
+                <option value="high">High 🔼</option>
+                <option value="low">Low 🔽</option>
+              </select>
+            </div>
+            <div class="field"><label>Recurrence</label><input id="tc-recur" placeholder="every week"></div>
+          </div>
+          <div class="field"><label>Section heading (optional)</label><input id="tc-section" placeholder="Tasks"></div>
+          <button class="btn-primary" id="tc-btn">Add task</button>
+          <div id="tc-result" class="query-block" style="margin-top:10px;display:none"></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-tasks-note">
+        <div class="card">
+          <div class="card-title">Create task note</div>
+          <div class="field"><label>Output path</label><input id="tn-path" placeholder="Projects/Sprint-01"></div>
+          <div class="field"><label>Title</label><input id="tn-title" placeholder="Sprint 01"></div>
+          <div class="field"><label>Area / context</label><input id="tn-area" placeholder="home-lab"></div>
+          <div class="field"><label>Tags (comma-separated)</label><input id="tn-tags" placeholder="sprint, project"></div>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Tasks (one per line, optionally: text | due=YYYY-MM-DD | priority=high)</p>
+          <textarea id="tn-tasks" rows="6" placeholder="Design the AI router&#10;Setup Proxmox cluster | due=2026-06-20 | priority=high&#10;Write documentation"></textarea>
+          <button class="btn-primary" style="margin-top:10px" id="tn-btn">Create task note</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TEMPLATER ══════════════════════════════════════════════════ -->
+    <section id="view-templater" class="view">
+      <div class="view-header"><h2>Templater</h2><p>Browse, create, and apply note templates.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tpl-browse">Templates</button>
+        <button class="tab-btn" data-tab="tpl-apply">Apply</button>
+        <button class="tab-btn" data-tab="tpl-create">Create template</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-tpl-browse">
+        <div class="two-col">
+          <div class="card">
+            <div class="btn-row" style="margin-bottom:8px">
+              <button id="tpl-refresh" class="btn-sm">↻ Refresh</button>
+            </div>
+            <ul class="notes-list" id="tpl-list"></ul>
+          </div>
+          <div class="card">
+            <div class="card-title">Preview</div>
+            <pre id="tpl-preview" style="max-height:420px;min-height:120px;font-size:12px"></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-tpl-apply">
+        <div class="card">
+          <div class="card-title">Apply template → new note</div>
+          <div class="field"><label>Template name or path</label><input id="tpl-apply-name" placeholder="concept"></div>
+          <div class="field"><label>Output path</label><input id="tpl-apply-output" placeholder="Concepts/My Note"></div>
+          <div class="field"><label>Title (resolves tp.file.title)</label><input id="tpl-apply-title"></div>
+          <div class="field"><label>Extra variables (JSON object, optional)</label><textarea id="tpl-apply-vars" rows="3" placeholder='{"author": "Alice"}'></textarea></div>
+          <button class="btn-primary" id="tpl-apply-btn">Apply template</button>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-tpl-create">
+        <div class="card">
+          <div class="card-title">Generate template scaffold</div>
+          <div class="field"><label>Template name</label><input id="tpl-new-name" placeholder="meeting-notes"></div>
+          <div class="field"><label>Type</label>
+            <select id="tpl-new-type">
+              <option value="concept">Concept</option>
+              <option value="project">Project</option>
+              <option value="journal">Journal / Daily</option>
+              <option value="meeting">Meeting</option>
+              <option value="reference">Reference</option>
+              <option value="system">System</option>
+            </select>
+          </div>
+          <div class="field"><label>Tags (comma-separated)</label><input id="tpl-new-tags"></div>
+          <div class="field"><label>Extra frontmatter fields (comma-separated)</label><input id="tpl-new-fields" placeholder="area, sprint"></div>
+          <button class="btn-primary" id="tpl-new-btn">Generate template</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ EXCALIDRAW ═════════════════════════════════════════════════ -->
+    <section id="view-excalidraw" class="view">
+      <div class="view-header"><h2>Excalidraw</h2><p>Generate architecture and concept diagrams.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="ex-arch">Architecture</button>
+        <button class="tab-btn" data-tab="ex-concept">Concept map</button>
+        <button class="tab-btn" data-tab="ex-parse">Parse / inspect</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-ex-arch">
+        <div class="card">
+          <div class="card-title">Architecture diagram</div>
+          <div class="field"><label>Output path</label><input id="ex-arch-path" placeholder="Diagrams/HomeLab Architecture"></div>
+          <div class="field"><label>Title</label><input id="ex-arch-title" placeholder="HomeLab Architecture"></div>
+          <div class="field"><label>Layout</label>
+            <select id="ex-arch-layout">
+              <option value="layered">Layered (left-to-right)</option>
+              <option value="grid">Grid</option>
+              <option value="radial">Radial</option>
+            </select>
+          </div>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:6px">Nodes (one per line: <code>id | label | type</code>  — type: service, database, queue, external, user)</p>
+          <textarea id="ex-arch-nodes" rows="5" placeholder="proxmox | Proxmox Host | service&#10;db | PostgreSQL | database&#10;mq | RabbitMQ | queue&#10;user | End User | user"></textarea>
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 6px">Edges (one per line: <code>from → to</code>  or  <code>from → to | label</code>)</p>
+          <textarea id="ex-arch-edges" rows="4" placeholder="user → proxmox&#10;proxmox → db | stores&#10;proxmox → mq | publishes"></textarea>
+          <button class="btn-primary" style="margin-top:10px" id="ex-arch-btn">Generate diagram</button>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-ex-concept">
+        <div class="card">
+          <div class="card-title">Concept map</div>
+          <div class="field"><label>Output path</label><input id="ex-con-path" placeholder="Diagrams/Home AI System"></div>
+          <div class="field"><label>Central concept</label><input id="ex-con-central" placeholder="Home AI System"></div>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:6px">Branches (one per line: <code>branch label | child1, child2, …</code>)</p>
+          <textarea id="ex-con-branches" rows="5" placeholder="Voice Module | Wake Word, STT, TTS&#10;Vision Module | Object Detection, Face ID&#10;Memory System | Short Term, Long Term"></textarea>
+          <button class="btn-primary" style="margin-top:10px" id="ex-con-btn">Generate map</button>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-ex-parse">
+        <div class="card">
+          <div class="card-title">Parse existing Excalidraw note</div>
+          <div class="input-row">
+            <input id="ex-parse-path" placeholder="Diagrams/Architecture.excalidraw.md">
+            <button class="btn-primary" id="ex-parse-btn">Parse</button>
+          </div>
+          <pre id="ex-parse-output" style="margin-top:10px;max-height:360px"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ OMNISEARCH ═════════════════════════════════════════════════ -->
+    <section id="view-omnisearch" class="view">
+      <div class="view-header"><h2>Omnisearch</h2><p>Optimise notes for search and quick-switcher discoverability.</p></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="om-optimise">Optimise note</button>
+        <button class="tab-btn" data-tab="om-bulk">Poorly indexed</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-om-optimise">
+        <div class="card">
+          <div class="input-row" style="margin-bottom:12px">
+            <input id="om-opt-path" placeholder="Path to note…">
+            <button class="btn-primary" id="om-opt-btn">Analyse</button>
+          </div>
+          <div id="om-opt-result"></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-om-bulk">
+        <div class="card">
+          <div class="btn-row" style="margin-bottom:12px">
+            <button class="btn-primary" id="om-bulk-btn">Find poorly-indexed notes</button>
+          </div>
+          <div id="om-bulk-result"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ PERMISSIONS ════════════════════════════════════════════════ -->
+    <section id="view-permissions" class="view">
+      <div class="view-header"><h2>Permissions</h2><p>Actions allowed or blocked by the active profile.</p></div>
+      <div class="perm-grid">
+        <div class="card">
+          <div class="card-title">Allowed <span class="badge" id="allowed-count">0</span></div>
+          <ul class="perm-list" id="allowed-actions"></ul>
+        </div>
+        <div class="card">
+          <div class="card-title">Blocked <span class="badge" id="blocked-count">0</span></div>
+          <ul class="perm-list" id="blocked-actions"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SETTINGS ═══════════════════════════════════════════════════ -->
+    <section id="view-settings" class="view">
+      <div class="view-header"><h2>Settings</h2></div>
+
+      <div class="card">
+        <div class="settings-section">
+          <h3>🔌 Obsidian Local REST API</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+            Connect to the <a href="https://github.com/coddingtonbear/obsidian-local-rest-api" target="_blank">Local REST API plugin</a>
+            so the MCP server syncs with a running Obsidian instance.
+            Without a key, notes are read and written directly from disk.
+          </p>
+
+          <div class="field">
+            <label>API Key</label>
+            <div class="key-input-wrap">
+              <input type="password" id="adapter-key" placeholder="Paste your REST API key here…" autocomplete="off">
+              <button class="key-toggle" id="key-toggle" type="button">Show</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 120px;gap:8px">
+            <div class="field" style="margin:0"><label>Host</label><input id="adapter-host" value="127.0.0.1"></div>
+            <div class="field" style="margin:0"><label>Port</label><input id="adapter-port" type="number" value="27123"></div>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn-primary" id="adapter-save-btn">Save connection</button>
+            <button id="adapter-test-btn">Test connection</button>
+            <button id="adapter-clear-btn" class="btn-danger btn-sm">Clear key</button>
+          </div>
+          <div class="status-row" id="adapter-status-row">
+            <span class="status-dot grey" id="adapter-dot"></span>
+            <span id="adapter-status-text">Not tested</span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>⚡ Server info</h3>
+          <pre id="settings-server-info" style="font-size:12px"></pre>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ══ AI RULES ══════════════════════════════════════════════════════ -->
+    <section id="view-rules" class="view">
+      <div class="view-header">
+        <h2>AI Rules</h2>
+        <p>Instructions the AI must follow when reading, writing, or reasoning about your vault. Injected into every MCP session as a system-level constraint.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Vault rules <span class="badge" id="rules-count">0</span></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          Write one rule per line. These are prepended to every Claude/LLM session as hard constraints.
+          Use plain language — the AI reads these verbatim.
+        </p>
+        <div class="field">
+          <label>Active rules</label>
+          <textarea id="rules-textarea" rows="14" placeholder="Never delete notes without explicit user confirmation.
+Always add a #status/seed tag to newly created notes.
+Do not modify notes inside the Archive/ folder.
+When creating tasks, always set a due date.
+Prefer atomic notes — one idea per file.
+Always link new notes to at least one MOC.
+Never overwrite frontmatter without reading it first.
+Tag all project notes with the project name."></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="rules-save-btn">Save rules</button>
+          <button id="rules-reset-btn" class="btn-sm">Reset to defaults</button>
+        </div>
+        <div id="rules-status" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">Rule templates</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Click to append a preset rule set.</p>
+        <div class="btn-row" id="rule-presets">
+          <button class="btn-sm" data-preset="homelab">🖥️ HomeLab vault</button>
+          <button class="btn-sm" data-preset="zettelkasten">🧩 Zettelkasten</button>
+          <button class="btn-sm" data-preset="gtd">✅ GTD workflow</button>
+          <button class="btn-sm" data-preset="safe">🔒 Safe mode</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">System prompt preview</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
+          This is what gets injected at the start of each MCP/LLM session.
+        </p>
+        <pre id="rules-preview" style="max-height:260px;font-size:12px;white-space:pre-wrap"></pre>
+      </div>
+    </section>
+
+
+    <!-- ══ DOCS ═══════════════════════════════════════════════════════════ -->
+    <section id="view-docs" class="view">
+      <div class="view-header">
+        <h2>Plugin Docs</h2>
+        <p>Reference for every plugin the MCP understands — syntax, examples, and usage notes for the AI.</p>
+      </div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="doc-dataview">Dataview</button>
+        <button class="tab-btn" data-tab="doc-tasks">Tasks</button>
+        <button class="tab-btn" data-tab="doc-templater">Templater</button>
+        <button class="tab-btn" data-tab="doc-excalidraw">Excalidraw</button>
+        <button class="tab-btn" data-tab="doc-omnisearch">Omnisearch</button>
+        <button class="tab-btn" data-tab="doc-mcp">MCP Tools</button>
+      </div>
+
+      <!-- DATAVIEW -->
+      <div class="tab-panel active" id="tab-doc-dataview">
+        <div class="card"><div class="card-title">Dataview — Query Language Reference</div>
+        <pre style="white-space:pre-wrap;font-size:12px">DATAVIEW PLUGIN  (github.com/blacksmithgu/obsidian-dataview)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DATA SOURCES
+  Frontmatter YAML (between --- fences at top of note)
+  Inline fields:  key:: value  or  [key:: value]  or  (key:: hidden)
+
+QUERY TYPES
+  TABLE field1, field2 FROM "folder" WHERE condition SORT field DESC LIMIT n
+  LIST   [field]       FROM source   WHERE condition SORT field
+  TASK                 FROM source   WHERE !completed GROUP BY file.folder
+  CALENDAR date        FROM source
+
+COMMON IMPLICIT FIELDS (always available)
+  file.name      file.path    file.size    file.ctime   file.mtime
+  file.tags      file.etags   file.inlinks file.outlinks file.aliases
+  file.starred   file.day     file.tasks   file.lists
+
+FROM SOURCES
+  FROM "folder"          — notes inside folder (recursive)
+  FROM #tag              — notes with tag
+  FROM [[Note]]          — notes linking to Note
+  FROM outgoing([[Note]])— notes Note links to
+  FROM "folder" OR #tag  — combine sources
+
+WHERE EXPRESSIONS
+  status = "active"      status != "done"
+  priority >= 2          due < date(today)
+  contains(tags, "#project")
+  !completed             length(file.tasks) > 0
+  date(file.ctime) > date("2026-01-01")
+
+SORT / LIMIT
+  SORT file.mtime DESC   SORT priority ASC, due ASC
+  LIMIT 20
+
+FLATTEN / GROUP BY
+  FLATTEN list-field AS item
+  GROUP BY file.folder
+
+EXAMPLES
+  ┌─ Active projects ──────────────────────────────────────────
+  │ ```dataview
+  │ TABLE status, priority, due
+  │ FROM "Projects"
+  │ WHERE status != "done"
+  │ SORT priority DESC
+  │ ```
+  ├─ Open tasks due this week ──────────────────────────────────
+  │ ```dataview
+  │ TASK
+  │ FROM ""
+  │ WHERE !completed AND due <= date(today) + dur(7 days)
+  │ SORT due ASC
+  │ ```
+  └─ Recently modified ─────────────────────────────────────────
+    ```dataview
+    TABLE file.mtime AS Modified
+    FROM ""
+    SORT file.mtime DESC
+    LIMIT 10
+    ```
+
+AI USAGE NOTES
+  • MCP generates static dataview blocks — the plugin renders them live in Obsidian.
+  • Always add inline fields (key:: value) when you want a note to be queryable.
+  • Use file.mtime for recency queries, not created date.
+  • Prefer FROM "folder" over FROM "" for performance in large vaults.</pre>
+        </div>
+      </div>
+
+      <!-- TASKS -->
+      <div class="tab-panel" id="tab-doc-tasks">
+        <div class="card"><div class="card-title">Tasks Plugin — Emoji Syntax Reference</div>
+        <pre style="white-space:pre-wrap;font-size:12px">TASKS PLUGIN  (github.com/obsidian-tasks-group/obsidian-tasks)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK FORMAT
+  - [ ] Task description  [emoji fields]  [#tags]  [^block-ref]
+
+TASK STATES
+  - [ ]  open          - [x]  done
+  - [-]  cancelled     - [/]  in-progress
+
+EMOJI FIELDS (must appear AFTER task text, parsed right-to-left)
+  📅 YYYY-MM-DD   due date
+  ⏳ YYYY-MM-DD   scheduled date
+  🛫 YYYY-MM-DD   start date
+  ✅ YYYY-MM-DD   done date (auto-added on completion)
+  ❌ YYYY-MM-DD   cancelled date
+  🔁 rule          recurrence  (e.g. "every week", "every month on the 1st")
+
+PRIORITY EMOJIS
+  ⏫  highest       🔼  high
+  🔽  low           ⏬  lowest
+  (no emoji = normal priority)
+
+RECURRENCE RULES (examples)
+  every day           every week
+  every month         every year
+  every weekday       every 2 weeks
+  every month on the 15th
+
+ORDERING RULE (important for AI)
+  Tasks reads BACKWARDS from line end. Place emojis in this order:
+  description  🔁 recurrence  🛫 start  ⏳ scheduled  📅 due  priority  #tags  ^block
+
+EXAMPLES
+  - [ ] Write daily standup 🔁 every weekday 📅 2026-06-14 🔼
+  - [ ] Review Proxmox backups 🔁 every month 📅 2026-07-01
+  - [x] Setup vault structure ✅ 2026-06-10
+  - [ ] Read AI paper 📅 2026-06-20 ⏫
+
+QUERY BLOCK (inside a note)
+  ```tasks
+  not done
+  due before 2026-07-01
+  priority is high
+  sort by due
+  ```
+
+AI USAGE NOTES
+  • Always put emoji fields AFTER the task text — Tasks parses right-to-left.
+  • Anything non-emoji after the description breaks date/priority parsing.
+  • Use 🔁 recurrence before date fields on the same line.
+  • The MCP create_task tool handles formatting automatically.
+  • Tags (#tag) and block refs (^id) go at the very end.</pre>
+        </div>
+      </div>
+
+      <!-- TEMPLATER -->
+      <div class="tab-panel" id="tab-doc-templater">
+        <div class="card"><div class="card-title">Templater — Syntax &amp; Functions Reference</div>
+        <pre style="white-space:pre-wrap;font-size:12px">TEMPLATER PLUGIN  (github.com/SilentVoid13/Templater)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+COMMAND TAGS
+  <% expression %>    — insert result of expression
+  <%* js code %>      — execute JavaScript (use tR += "..." to append)
+  <%+ expression %>   — dynamic command (only re-evaluates in preview)
+  <%- expression %>   — whitespace-trimming variant
+
+tp OBJECT — BUILT-IN MODULES
+
+  tp.date
+    tp.date.now()                        → "2026-06-13"  (ISO)
+    tp.date.now("YYYY-MM-DD")            → "2026-06-13"
+    tp.date.now("dddd, MMMM Do YYYY")    → "Saturday, June 13th 2026"
+    tp.date.now("YYYY-MM-DD", -1)        → yesterday
+    tp.date.now("YYYY-MM-DD", 7)         → 7 days from now
+    tp.date.tomorrow("YYYY-MM-DD")       → tomorrow
+    tp.date.yesterday("YYYY-MM-DD")      → yesterday
+    tp.date.weekday("YYYY-MM-DD", 0)     → this Monday
+
+  tp.file
+    tp.file.title          → current file name (without .md)
+    tp.file.folder(true)   → full folder path
+    tp.file.path(true)     → full file path
+    tp.file.creation_date("YYYY-MM-DD")
+    tp.file.last_modified_date("YYYY-MM-DD")
+    tp.file.cursor()       → place cursor here after render
+    tp.file.cursor(1)      → numbered cursor jump point
+    tp.file.tags           → array of file tags
+
+  tp.system
+    await tp.system.prompt("Enter title:")         → user input string
+    await tp.system.suggester(["A","B"], ["a","b"])→ user picks from list
+    await tp.system.clipboard()                    → clipboard content
+
+  tp.frontmatter
+    tp.frontmatter.status   → reads frontmatter field "status"
+
+MOMENT.JS DATE FORMATS
+  YYYY → 2026    MM → 06    DD → 13
+  dddd → Saturday    ddd → Sat    Do → 13th
+  HH:mm → 14:35
+
+STATIC vs DYNAMIC (MCP behaviour)
+  MCP resolves these at generation time (no Obsidian required):
+    tp.date.now()   tp.date.now("YYYY-MM-DD")   tp.file.title
+  MCP preserves these as-is for Templater to resolve when opened:
+    <%* js blocks %>   tp.system.prompt()   tp.file.cursor()
+
+TEMPLATE TYPES SUPPORTED BY MCP
+  concept   project   journal   meeting   reference   system
+
+EXAMPLES
+  ---
+  title: <% tp.file.title %>
+  created: <% tp.date.now("YYYY-MM-DD") %>
+  type: project
+  status: active
+  ---
+  # <% tp.file.title %>
+  ## Tasks
+  - [ ] First task 📅 <% tp.date.now("YYYY-MM-DD", 7) %>
+
+AI USAGE NOTES
+  • MCP resolves static tp.* calls at note-generation time.
+  • Dynamic <%* %> blocks are preserved as-is for Templater.
+  • Use apply_template tool to render a template into a new note.
+  • Templates folder defaults to "Templates/" — configure via env.</pre>
+        </div>
+      </div>
+
+      <!-- EXCALIDRAW -->
+      <div class="tab-panel" id="tab-doc-excalidraw">
+        <div class="card"><div class="card-title">Excalidraw — File Format &amp; AI Generation Guide</div>
+        <pre style="white-space:pre-wrap;font-size:12px">EXCALIDRAW PLUGIN  (github.com/zsviczian/obsidian-excalidraw-plugin)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FILE FORMAT  (.excalidraw.md)
+  A markdown file with special frontmatter + embedded JSON block.
+
+  ---
+  excalidraw-plugin: parsed
+  tags: [excalidraw, diagram]
+  ---
+  # Diagram Title
+
+  ```json
+  {
+    "type": "excalidraw",
+    "version": 2,
+    "elements": [ ... ],
+    "appState": { "viewBackgroundColor": "transparent" }
+  }
+  ```
+
+ELEMENT TYPES
+  rectangle   ellipse   diamond   arrow   line   text   freedraw
+  image       frame     embeddable
+
+COMMON ELEMENT FIELDS
+  {
+    "id": "el-0001",
+    "type": "rectangle",
+    "x": 100, "y": 200,
+    "width": 180, "height": 60,
+    "strokeColor": "#1e1e1e",
+    "backgroundColor": "#dbe9ff",
+    "fillStyle": "solid",       // hachure | solid | cross-hatch | dots
+    "strokeWidth": 2,
+    "strokeStyle": "solid",     // solid | dashed | dotted
+    "roughness": 1,             // 0=polished, 1=hand-drawn, 2=rough
+    "opacity": 100,
+    "text": "My Node",
+    "fontSize": 16,
+    "fontFamily": 3,            // 1=hand, 2=normal, 3=mono
+    "textAlign": "center",
+    "angle": 0
+  }
+
+ARROW ELEMENT (additional fields)
+  "points": [[0,0],[200,0]]    // relative coordinates from x,y
+  "startBinding": null         // or { "elementId": "el-0001" }
+  "endBinding":   null
+
+NODE STYLES USED BY MCP
+  service  → rectangle, #dbe9ff (blue)
+  database → ellipse,   #fce8ff (purple)
+  queue    → rectangle, #fff3bf (yellow)
+  external → rectangle, #e8f5e9 (green)
+  user     → ellipse,   #ffeedd (orange)
+
+LAYOUTS
+  layered  → left-to-right horizontal flow
+  grid     → sqrt(n) columns
+  radial   → circular around centre
+
+MCP TOOLS
+  generate_excalidraw_architecture(path, title, nodes, edges, layout)
+  generate_excalidraw_concept_map(path, central_concept, branches)
+  excalidraw_parse_elements(path)
+  excalidraw_add_annotation(path, text, x, y)
+
+AI USAGE NOTES
+  • Always use .excalidraw.md extension for Obsidian Excalidraw plugin to open it.
+  • Enable "Decompress Excalidraw JSON" in plugin settings to edit JSON directly.
+  • IDs must be unique strings within the file.
+  • Arrow points are RELATIVE to the arrow's x,y origin, not absolute.
+  • roughness=0 for clean diagrams; roughness=1 for hand-drawn aesthetic.
+  • Since Excalidraw 1.6.13+, JSON may be compressed — MCP always writes decompressed.</pre>
+        </div>
+      </div>
+
+      <!-- OMNISEARCH -->
+      <div class="tab-panel" id="tab-doc-omnisearch">
+        <div class="card"><div class="card-title">Omnisearch — Indexing &amp; Optimisation Guide</div>
+        <pre style="white-space:pre-wrap;font-size:12px">OMNISEARCH PLUGIN  (github.com/scambier/obsidian-omnisearch)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT OMNISEARCH INDEXES
+  • Note file names and paths
+  • Frontmatter: title, aliases, tags, all custom fields
+  • Full note body content
+  • Headings (weighted higher)
+  • PDF content (if PDF indexing enabled)
+
+WHAT MAKES A NOTE DISCOVERABLE
+  ✓ Descriptive filename (spaces > underscores > slugs)
+  ✓ title: in frontmatter (overrides filename in results)
+  ✓ aliases: list in frontmatter (alternative names)
+  ✓ tags: specific and hierarchical (#home-lab/proxmox)
+  ✓ Key terms repeated naturally in body
+  ✓ Headings that match common search queries
+
+ALIASES FRONTMATTER
+  aliases:
+    - Proxmox Hypervisor
+    - PVE
+    - Proxmox VE
+
+  These let Omnisearch (and Obsidian quick-switcher) find the note
+  by any of these names. The MCP add_aliases tool writes this for you.
+
+TAGS — HIERARCHICAL FORMAT
+  tags:
+    - home-lab
+    - home-lab/networking
+    - status/active
+    - type/project
+
+COMMON SEARCH PATTERNS
+  Omnisearch supports:
+    exact phrase    "proxmox cluster"
+    word prefix     proxy*
+    file path       path:Projects/
+    tag filter      tag:home-lab
+    fuzzy match     (default for single words)
+
+MCP TOOLS
+  omnisearch_suggest_aliases(path, limit)   → alias candidates
+  omnisearch_add_aliases(path, aliases)     → write to frontmatter
+  omnisearch_suggest_keywords(path, limit)  → keyword gaps
+  omnisearch_find_poorly_indexed(limit)     → vault audit
+  omnisearch_optimise_note(path)            → full report
+
+AI USAGE NOTES
+  • Run omnisearch_find_poorly_indexed after bulk note creation.
+  • Always set title in frontmatter — it weights higher than filename.
+  • Acronyms make great aliases: "Home AI System" → alias "HAS".
+  • Tags should be hierarchical: #system/networking not just #networking.
+  • Omnisearch indexes in real-time — changes appear immediately.</pre>
+        </div>
+      </div>
+
+      <!-- MCP TOOLS -->
+      <div class="tab-panel" id="tab-doc-mcp">
+        <div class="card"><div class="card-title">MCP Tool Registry — Complete Reference</div>
+        <pre style="white-space:pre-wrap;font-size:12px">OBSIDIAN MCP — TOOL REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CORE VAULT TOOLS
+  read_note(path)                         → {path, content, metadata, backlinks}
+  create_note(path, content)              → {path, content, metadata}
+  update_note(path, content)              → {path, content, metadata}
+  append_note(path, content)             → {path, content, metadata}
+  delete_note(path)                       → {path, deleted}
+  move_note(source, destination)          → {from, to}
+  rename_note(path, new_name)             → {from, to}
+  search_notes(query, limit?)             → [{path, score, preview}]
+  list_files()                            → [path, ...]
+  list_folders()                          → [path, ...]
+
+KNOWLEDGE TOOLS
+  build_moc(topic, output_path?, limit?)
+    → Creates a Map of Content note linking related notes.
+  create_atomic_note(path, title, content, tags?, aliases?, source_links?)
+    → Creates a focused single-concept note with proper frontmatter.
+  refactor_large_note(path, create_notes?)
+    → Returns heading-based split proposals; optionally creates sub-notes.
+  suggest_backlinks(path, limit?)
+    → Finds notes that should link to the given note.
+  auto_tag(path, limit?)
+    → Suggests tags based on content analysis.
+  semantic_search(query, limit?)
+    → Content-similarity search (no embeddings required).
+  detect_duplicates(threshold?)
+    → Finds likely duplicate notes by similarity score.
+  build_relationship_graph()
+    → Returns {nodes, edges} of the full vault link graph.
+  suggest_para_location(path)
+    → Returns PARA bucket (Projects/Areas/Resources/Archives).
+  suggest_johnny_decimal_location(path)
+    → Returns Johnny Decimal prefix suggestions.
+  create_dataview_dashboard(path, title, tags?)
+    → Creates a Dataview dashboard note.
+  generate_excalidraw_architecture(path, title)
+    → Creates an Excalidraw architecture diagram from vault graph.
+
+DATAVIEW TOOLS
+  dataview_extract_fields(path)           → {frontmatter_fields, inline_fields, merged}
+  dataview_add_inline_fields(path, fields) → updates note with key:: value pairs
+  dataview_build_dashboard(path, title, folders?, tags?, include_tasks?, include_recent?)
+
+TASKS TOOLS
+  tasks_list(note_path, state?)           → [{state, text, due, priority, ...}]
+  tasks_aggregate(state?, folder?, due_before?, priority?, limit?)
+  tasks_create(note_path, text, due?, scheduled?, priority?, recurrence?, section?)
+  tasks_complete(note_path, task_text_fragment)
+  tasks_create_note(path, title, tasks[], tags?, area?)
+
+TEMPLATER TOOLS
+  templater_list_templates()              → [{path, name}]
+  templater_read_template(name_or_path)   → {path, content, metadata}
+  templater_apply(template_name, output_path, variables?, title?)
+  templater_create_template(name, type, custom_fields?, tags?)
+    types: concept | project | journal | meeting | reference | system
+
+EXCALIDRAW TOOLS
+  excalidraw_generate_architecture(path, title, nodes[], edges[], layout?)
+    nodes: [{id, label, type}]  types: service|database|queue|external|user
+    edges: [{from, to, label?}]  layout: layered|grid|radial
+  excalidraw_generate_concept_map(path, central_concept, branches[])
+    branches: [{label, children[]}]
+  excalidraw_parse_elements(path)         → {element_count, elements[]}
+  excalidraw_add_annotation(path, text, x?, y?)
+
+OMNISEARCH TOOLS
+  omnisearch_suggest_aliases(path, limit?) → {existing_aliases, suggested_aliases}
+  omnisearch_add_aliases(path, aliases[]) → {added, aliases}
+  omnisearch_suggest_keywords(path, limit?) → {suggested_keywords[{keyword, frequency}]}
+  omnisearch_find_poorly_indexed(limit?)  → [{path, issues[], score}]
+  omnisearch_optimise_note(path)          → {alias_suggestions, keyword_suggestions}
+
+PERMISSION PROFILES
+  read_only   — read, search, list, suggest (no writes)
+  safe_write  — all of above + create/update/append + all plugin writes (default)
+  admin       — all actions including delete, move, rename</pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

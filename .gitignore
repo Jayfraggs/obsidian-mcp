@@ -8,6 +8,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.superpowers/
 dist/
 build/
 *.egg-info/
+.agent_logs.md

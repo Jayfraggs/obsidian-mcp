@@ -16,9 +16,9 @@ There is no Git repository currently initialized in this folder.
 
 The selected implementation strategy is a staged foundation-first build:
 
-1. Build the environment and architecture foundation from Prompt 1.
-2. Add core MCP note and file tools from Prompt 2.
-3. Add advanced and scaling features from Prompt 3.
+1. Build the environment and architecture foundation from Prompt 1. Completed.
+2. Add core MCP note and file tools from Prompt 2. Completed.
+3. Add advanced and scaling features from Prompt 3. Local advanced tools completed; platform features deferred.
 
 ## Foundation Status
 
@@ -33,6 +33,38 @@ Prompt 1 is implemented as a Python 3.11+ package foundation with:
 - Tests stored under `_test_`.
 
 Verification passed with `uv run --extra dev pytest -v` and `uv run python -c "from obsidian_mcp.__main__ import build_server; print(build_server)"`.
+
+## Core Tools Status
+
+Prompt 2 is implemented with:
+
+- Core note tools: `read_note`, `create_note`, `update_note`, `append_note`, `delete_note`, `move_note`, and `rename_note`.
+- Discovery tools: `search_notes`, `list_files`, and `list_folders`.
+- Vault path safety for user-provided paths.
+- Metadata extraction for frontmatter, aliases, tags, wiki links, markdown links, task lines, Dataview inline fields, Templater markers, and Excalidraw files.
+- Backlink analysis by scanning markdown notes.
+- MCP registration through `obsidian_mcp.tools.core.register_core_tools`.
+
+## Advanced Tools Status
+
+Prompt 3 local advanced tools are implemented with:
+
+- Knowledge tools: `build_moc`, `create_atomic_note`, `refactor_large_note`, `suggest_backlinks`, and `auto_tag`.
+- PARA and Johnny Decimal suggestion helpers.
+- Dataview dashboard note generation.
+- Deterministic local semantic-style search.
+- Duplicate detection.
+- Relationship graph generation.
+- Excalidraw architecture note generation.
+- MCP registration through `obsidian_mcp.tools.knowledge.register_knowledge_tools`.
+
+Prompt 3 local permissions and Web UI are implemented with:
+
+- Local single-user permission profiles: `read_only`, `safe_write`, and `admin`.
+- Backend permission enforcement through `PermissionService`.
+- FastAPI Web API and static Web UI served by `obsidian-mcp-web`.
+
+Deferred Prompt 3 platform features remain SQLite metadata cache, multi-user authentication, remote deployment permissions, and remote embedding-backed search.
 
 ## Documentation Rules In Use
 

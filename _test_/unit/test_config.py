@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from obsidian_mcp.config import LogLevel, ObsidianMCPSettings, load_settings
+from obsidian_mcp.permissions import PermissionProfile
 
 
 def test_settings_model_can_be_imported() -> None:
@@ -16,6 +17,9 @@ def test_settings_use_safe_defaults(tmp_path: Path) -> None:
     assert settings.vault_path == tmp_path
     assert settings.server_name == "obsidian-mcp"
     assert settings.log_level is LogLevel.INFO
+    assert settings.permission_profile is PermissionProfile.SAFE_WRITE
+    assert settings.web_host == "127.0.0.1"
+    assert settings.web_port == 8765
 
 
 def test_settings_load_from_environment(
@@ -25,12 +29,18 @@ def test_settings_load_from_environment(
     monkeypatch.setenv("OBSIDIAN_MCP_VAULT_PATH", str(tmp_path))
     monkeypatch.setenv("OBSIDIAN_MCP_SERVER_NAME", "notes-server")
     monkeypatch.setenv("OBSIDIAN_MCP_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("OBSIDIAN_MCP_PERMISSION_PROFILE", "read_only")
+    monkeypatch.setenv("OBSIDIAN_MCP_WEB_HOST", "localhost")
+    monkeypatch.setenv("OBSIDIAN_MCP_WEB_PORT", "9001")
 
     settings = load_settings()
 
     assert settings.vault_path == tmp_path
     assert settings.server_name == "notes-server"
     assert settings.log_level is LogLevel.DEBUG
+    assert settings.permission_profile is PermissionProfile.READ_ONLY
+    assert settings.web_host == "localhost"
+    assert settings.web_port == 9001
 
 
 def test_settings_reject_missing_vault_path(tmp_path: Path) -> None:
