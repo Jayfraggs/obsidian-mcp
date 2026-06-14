@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "obsidian-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for Obsidian vaults — Dataview, Tasks, Templater, Excalidraw, Omnisearch"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,11 +36,18 @@ dev = [
 ]
 
 [project.scripts]
+# Separate entry points = separate .exe files on Windows = no locking conflict
 obsidian-mcp     = "obsidian_mcp.__main__:main"
-obsidian-mcp-web = "obsidian_mcp.__main__:web_main"
+obsidian-mcp-web = "obsidian_mcp._web_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/obsidian_mcp"]
+
+# ── uv settings ────────────────────────────────────────────────────────
+# Prevents uv from rebuilding the package on every `uv run` invocation.
+# After `uv pip install -e .` the scripts are stable.
+[tool.uv]
+dev-dependencies = []
 
 [tool.ruff]
 line-length = 100

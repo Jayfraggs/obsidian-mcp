@@ -12,4 +12,5 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-.agent_logs.md
+./agent_logs.md
+./Run.txt

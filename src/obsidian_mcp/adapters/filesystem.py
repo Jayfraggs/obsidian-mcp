@@ -3,6 +3,12 @@
 Replicates the raw I/O that ``VaultService`` previously did inline,
 using the project's own ``VaultPathResolver`` and error types so
 behaviour is identical to the original code.
+
+PERF FIXES (2026-06):
+- list_files / list_folders now skip .git, .obsidian internals, and
+  any directory starting with '.' plus the copilot/ folder.
+- search_notes scores path+content but skips excluded dirs.
+- Added _EXCLUDED_DIRS constant for easy tuning.
 """
 
 from __future__ import annotations
@@ -19,6 +25,25 @@ from obsidian_mcp.vault.paths import VaultPathResolver
 from .base import ObsidianAdapter, RawNote, RawSearchResult
 
 logger = logging.getLogger("obsidian_mcp.adapters.filesystem")
+
+# Directories (by name) to skip during any recursive scan.
+_EXCLUDED_DIR_NAMES: frozenset[str] = frozenset({
+    ".git",
+    ".obsidian",   # Obsidian config; not user notes
+    "copilot",     # GitHub Copilot cache
+    ".trash",      # Obsidian trash
+    "node_modules",
+})
+
+
+def _is_excluded(path: Path, vault_root: Path) -> bool:
+    """Return True if *path* is inside (or is) an excluded directory."""
+    try:
+        rel = path.relative_to(vault_root)
+    except ValueError:
+        return False
+    # Check every path component against the excluded set.
+    return any(part in _EXCLUDED_DIR_NAMES or part.startswith(".") for part in rel.parts[:-1])
 
 
 class FilesystemAdapter(ObsidianAdapter):
@@ -84,14 +109,17 @@ class FilesystemAdapter(ObsidianAdapter):
         return sorted(
             self.resolver.to_vault_relative(p)
             for p in self._vault.rglob("*")
-            if p.is_file()
+            if p.is_file() and not _is_excluded(p, self._vault)
         )
 
     def list_folders(self) -> list[str]:
         return sorted(
             self.resolver.to_vault_relative(p)
             for p in self._vault.rglob("*")
-            if p.is_dir()
+            if p.is_dir() and not _is_excluded(p, self._vault)
+            # Also skip the excluded dirs themselves
+            and p.name not in _EXCLUDED_DIR_NAMES
+            and not p.name.startswith(".")
         )
 
     def search_notes(self, query: str, limit: int = 10) -> list[RawSearchResult]:
@@ -101,6 +129,8 @@ class FilesystemAdapter(ObsidianAdapter):
         results: list[RawSearchResult] = []
         for note_path in self._vault.rglob("*.md"):
             if not note_path.is_file():
+                continue
+            if _is_excluded(note_path, self._vault):
                 continue
             try:
                 content = note_path.read_text(encoding="utf-8", errors="ignore")

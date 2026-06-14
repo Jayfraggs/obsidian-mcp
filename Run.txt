@@ -1,0 +1,19 @@
+cd 'C:\Users\Olabode Nathaniel\Code\obsidian-mcp'; & '.venv\Scripts\obsidian-mcp.exe'
+cd 'C:\Users\Olabode Nathaniel\Code\obsidian-mcp'; & '.venv\Scripts\obsidian-mcp-web.exe'
+https://127.0.0.1:27124/
+
+cd "C:\Users\Olabode Nathaniel\Code\obsidian-mcp"
+# Kill any stuck processes
+Stop-Process -Name "obsidian-mcp" -ErrorAction SilentlyContinue
+
+# Run the installer (does everything)
+.\install.ps1
+
+OR
+
+
+Stop-Process -Name "obsidian-mcp" -ErrorAction SilentlyContinue
+Stop-Process -Name "obsidian-mcp-web" -ErrorAction SilentlyContinue
+
+uv pip install -e .
+.venv\Scripts\python.exe -m obsidian_mcp check

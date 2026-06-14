@@ -1,4 +1,12 @@
-"""High-level knowledge-management operations for Obsidian vaults."""
+"""High-level knowledge-management operations for Obsidian vaults.
+
+PERF FIXES (2026-06):
+- _documents() now reads files directly via the adapter (bypassing
+  find_backlinks) instead of calling read_note() which previously
+  triggered an O(N) vault scan per file → O(N²) total.
+- suggest_backlinks passes include_backlinks=False to avoid the double
+  backlink computation that was happening before.
+"""
 
 from __future__ import annotations
 
@@ -89,14 +97,15 @@ class KnowledgeService:
 
     def suggest_backlinks(self, path: str, limit: int = 10) -> list[dict[str, Any]]:
         """Suggest candidate backlinks for a note."""
-        source = self._document_from_payload(self.vault.read_note(path))
+        # read_note without backlinks to avoid triggering vault scan
+        source = self._document_from_payload(self.vault.read_note(path, include_backlinks=False))
         existing = set(self.vault.find_backlinks(path))
         candidates = [doc for doc in self._documents() if doc.path != source.path and doc.path not in existing]
         return semantic_rank(source.searchable_text(), candidates, limit=limit)
 
     def auto_tag(self, path: str, limit: int = 5) -> list[dict[str, Any]]:
         """Suggest tags for a note from existing vault tags and content terms."""
-        source = self._document_from_payload(self.vault.read_note(path))
+        source = self._document_from_payload(self.vault.read_note(path, include_backlinks=False))
         existing_tags = sorted({tag for doc in self._documents() for tag in doc.tags})
         return suggest_tags(source, existing_tags, limit=limit)
 
@@ -114,13 +123,13 @@ class KnowledgeService:
 
     def suggest_para_location(self, path: str) -> dict[str, str]:
         """Suggest a PARA bucket and folder for a note."""
-        document = self._document_from_payload(self.vault.read_note(path))
+        document = self._document_from_payload(self.vault.read_note(path, include_backlinks=False))
         bucket = classify_para(document)
         return {"path": document.path, "bucket": bucket, "folder": bucket}
 
     def suggest_johnny_decimal_location(self, path: str) -> dict[str, str | None]:
         """Return Johnny Decimal prefixes detected for a note path."""
-        document = self._document_from_payload(self.vault.read_note(path))
+        document = self._document_from_payload(self.vault.read_note(path, include_backlinks=False))
         parsed = parse_johnny_decimal_prefix(document.path)
         parsed["path"] = document.path
         return parsed
@@ -144,10 +153,20 @@ class KnowledgeService:
         )
 
     def _documents(self) -> list[NoteDocument]:
+        """Load all vault notes as NoteDocuments.
+
+        Reads each file once via the adapter directly — does NOT call
+        read_note() to avoid triggering find_backlinks on every file.
+        """
         documents: list[NoteDocument] = []
         for file_path in self.vault.list_files():
-            if file_path.endswith(".md"):
-                documents.append(self._document_from_payload(self.vault.read_note(file_path)))
+            if not file_path.endswith(".md"):
+                continue
+            raw = self.vault._adapter.read_note(file_path)
+            if not raw.exists:
+                continue
+            payload = self.vault._note_payload(file_path, raw.content)
+            documents.append(self._document_from_payload(payload))
         return documents
 
     @staticmethod

@@ -42,9 +42,9 @@ def register_core_tools(
     service = vault_service or VaultService(settings.vault_path)
 
     @server.tool("read_note")
-    def read_note(path: str):
-        """Read a markdown note from the configured Obsidian vault."""
-        return service.read_note(path)
+    def read_note(path: str, include_backlinks: bool = False):
+        """Read a markdown note from the vault. include_backlinks=True adds backlink scan (slow on large vaults)."""
+        return service.read_note(path, include_backlinks=include_backlinks)
 
     @server.tool("create_note")
     def create_note(path: str, content: str):

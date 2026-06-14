@@ -22,6 +22,7 @@ plugin-native markdown that Obsidian can read and render without any extra confi
 10. [Vault adapter modes](#vault-adapter-modes)
 11. [Permission profiles](#permission-profiles)
 12. [Troubleshooting](#troubleshooting)
+13. [Developer docs](#developer-docs)
 
 ---
 
@@ -567,41 +568,55 @@ parses right-to-left. Example of correct order:
 
 ---
 
+## Developer docs
+
+Internal technical references are in the [`docs/`](docs/) folder.
+
+| Doc | What it covers |
+|-----|---------------|
+| [docs/backlink-index.md](docs/backlink-index.md) | `BacklinkIndex` architecture, cold-start persistence, watchdog live updates, thread safety, performance, logging reference |
+
+---
+
 ## Project structure
 
 ```
 obsidian-mcp/
+├── docs/                        ← developer technical references
+│   ├── README.md                ← docs index
+│   └── backlink-index.md        ← BacklinkIndex architecture & persistence
 ├── src/obsidian_mcp/
 │   ├── __init__.py
-│   ├── __main__.py          ← entry points (MCP + Web UI)
-│   ├── config.py            ← settings (env vars)
-│   ├── server.py            ← FastMCP factory
-│   ├── permissions.py       ← permission profiles
-│   ├── errors.py            ← typed error classes
-│   ├── logging.py           ← structured logging
-│   ├── adapters/            ← vault I/O backends
+│   ├── __main__.py              ← entry points (MCP + Web UI)
+│   ├── config.py                ← settings (env vars)
+│   ├── server.py                ← FastMCP factory
+│   ├── permissions.py           ← permission profiles
+│   ├── errors.py                ← typed error classes
+│   ├── logging.py               ← structured logging
+│   ├── adapters/                ← vault I/O backends
 │   │   ├── base.py
-│   │   ├── filesystem.py    ← direct .md file access
-│   │   ├── rest_api.py      ← Obsidian Local REST API
-│   │   └── auto.py          ← probes and selects adapter
-│   ├── vault/               ← core vault operations
-│   │   ├── service.py
+│   │   ├── filesystem.py        ← direct .md file access + exclusion helpers
+│   │   ├── rest_api.py          ← Obsidian Local REST API
+│   │   └── auto.py              ← probes and selects adapter
+│   ├── vault/                   ← core vault operations
+│   │   ├── service.py           ← VaultService (wires BacklinkIndex)
+│   │   ├── index.py             ← BacklinkIndex + watchdog handler
 │   │   ├── paths.py
 │   │   └── metadata.py
-│   ├── knowledge/           ← MOC, graph, PARA, duplicates
+│   ├── knowledge/               ← MOC, graph, PARA, duplicates
 │   │   ├── service.py
 │   │   └── analysis.py
-│   ├── plugins/             ← plugin-aware services
+│   ├── plugins/                 ← plugin-aware services
 │   │   ├── dataview.py
 │   │   ├── tasks.py
 │   │   ├── templater.py
 │   │   ├── excalidraw.py
 │   │   └── omnisearch.py
-│   ├── tools/               ← MCP tool registrations
+│   ├── tools/                   ← MCP tool registrations
 │   │   ├── core.py
 │   │   ├── knowledge.py
 │   │   └── plugins.py
-│   └── web/                 ← local Web UI
+│   └── web/                     ← local Web UI
 │       ├── app.py
 │       └── static/
 │           ├── index.html
@@ -609,7 +624,7 @@ obsidian-mcp/
 │           └── app.js
 ├── tests/
 ├── .env.example
-├── .vault-rules             ← AI behavioural rules (auto-created)
+├── .vault-rules                 ← AI behavioural rules (auto-created)
 ├── pyproject.toml
 └── README.md
 ```
