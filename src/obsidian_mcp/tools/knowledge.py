@@ -71,7 +71,7 @@ def register_knowledge_tools(
 
     @server.tool("suggest_backlinks")
     def suggest_backlinks(path: str, limit: int = 10):
-        """Suggest candidate backlinks for a note."""
+        """Suggest candidate backlinks for a note. Uses an in-memory index — fast and safe to call."""
         return knowledge_service.suggest_backlinks(path, limit)
 
     @server.tool("auto_tag")
@@ -81,17 +81,17 @@ def register_knowledge_tools(
 
     @server.tool("semantic_search")
     def semantic_search(query: str, limit: int = 10):
-        """Run deterministic local semantic-style search."""
+        """Run deterministic local semantic-style search. Uses cached in-memory reads — will not time out."""
         return knowledge_service.semantic_search(query, limit)
 
     @server.tool("detect_duplicates")
     def detect_duplicates(threshold: float = 82):
-        """Detect likely duplicate notes."""
+        """Detect likely duplicate notes. Vault scan is cached in memory — will not time out."""
         return knowledge_service.detect_duplicates(threshold)
 
     @server.tool("build_relationship_graph")
     def build_relationship_graph():
-        """Build a relationship graph across markdown notes."""
+        """Build a relationship graph across markdown notes. Uses cached in-memory reads — will not time out."""
         return knowledge_service.build_relationship_graph()
 
     @server.tool("suggest_para_location")

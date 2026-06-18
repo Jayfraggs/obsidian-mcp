@@ -422,7 +422,7 @@ def register_plugin_tools(
 
     @server.tool("omnisearch_find_poorly_indexed")
     def omnisearch_find_poorly_indexed(limit: int = 20) -> list[dict[str, Any]]:
-        """Audit the vault and return notes that are hard to find via search.
+        """Audit the vault and return notes that are hard to find via search. Uses cached in-memory reads — will not time out.
 
         A note is flagged when it has no title, no aliases, no tags, or a
         non-descriptive filename.

@@ -218,14 +218,22 @@ def generate_excalidraw_markdown(title: str, graph: dict[str, list[dict[str, Any
         )
 
     payload = {"type": "excalidraw", "version": 2, "source": "obsidian-mcp", "elements": elements}
+    json_str = json.dumps(payload, indent=2, sort_keys=True)
+    # Excalidraw plugin (parsed mode) requires the JSON inside a %% comment block
+    # under a ## Drawing heading. A regular fenced code block is NOT recognised.
     return (
         "---\n"
         "excalidraw-plugin: parsed\n"
+        "tags: [excalidraw, diagram]\n"
         f"title: {title}\n"
         "---\n\n"
+        f"# {title}\n\n"
+        "%%\n"
+        "## Drawing\n"
         "```json\n"
-        f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
+        f"{json_str}\n"
         "```\n"
+        "%%\n"
     )
 
 
