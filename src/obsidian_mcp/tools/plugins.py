@@ -14,6 +14,7 @@ from obsidian_mcp.config import ObsidianMCPSettings
 from obsidian_mcp.plugins import (
     DataviewService,
     ExcalidrawService,
+    KanbanService,
     OmnisearchService,
     TasksService,
     TemplaterService,
@@ -44,6 +45,18 @@ PLUGIN_TOOL_NAMES = (
     "excalidraw_generate_concept_map",
     "excalidraw_parse_elements",
     "excalidraw_add_annotation",
+    "excalidraw_write_script",
+    "excalidraw_embed_in_note",
+    "excalidraw_install_scripts",
+    "excalidraw_list_bundled_scripts",
+    # Kanban
+    "kanban_create_board",
+    "kanban_create_simple_board",
+    "kanban_add_card",
+    "kanban_move_card",
+    "kanban_complete_card",
+    "kanban_read_board",
+    "kanban_lane_summary",
     # Omnisearch
     "omnisearch_suggest_aliases",
     "omnisearch_add_aliases",
@@ -72,6 +85,7 @@ def register_plugin_tools(
     tpl = TemplaterService(vault, templates_folder=templates_folder)
     ex  = ExcalidrawService(vault)
     om  = OmnisearchService(vault)
+    kb  = KanbanService(vault)
 
     # ── Dataview ──────────────────────────────────────────────────────
 
@@ -340,6 +354,7 @@ def register_plugin_tools(
         """Generate an Excalidraw architecture diagram from a node/edge specification.
 
         Creates a .excalidraw.md file that Obsidian's Excalidraw plugin can open.
+        Use excalidraw_embed_in_note afterwards to display the diagram inline in any .md note.
 
         Args:
             path: Output vault path (will append .excalidraw.md if needed).
@@ -358,6 +373,8 @@ def register_plugin_tools(
         branches: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Generate a radial concept map centred on one idea.
+
+        Use excalidraw_embed_in_note afterwards to display it inline in any .md note.
 
         Args:
             path: Output vault path.
@@ -390,6 +407,254 @@ def register_plugin_tools(
             y: Y coordinate.
         """
         return ex.add_text_annotation(path, text, x=x, y=y)
+
+    @server.tool("excalidraw_write_script")
+    def excalidraw_write_script(
+        script_name: str,
+        description: str,
+        js_code: str,
+        scripts_folder: str = "Excalidraw/Scripts",
+    ) -> dict[str, Any]:
+        """Write a JavaScript automation script for Excalidraw's Script Engine.
+
+        The script is saved as a .md file in the vault's scripts folder and
+        immediately appears in Obsidian's command palette as
+        "Excalidraw Script: <script_name>" — no restart needed.
+
+        The Script Engine injects two globals into every script:
+          - ea  : ExcalidrawAutomate instance bound to the active drawing.
+                  Provides addRect(), addText(), addArrow(), connectObjects(),
+                  getViewSelectedElements(), addElementsToView(), etc.
+          - utils: UI helpers — utils.inputPrompt(), utils.suggester().
+
+        Use this to author automations the user can trigger interactively,
+        such as re-colouring nodes, adding boxes around selections, bulk
+        relabelling, or custom layout adjustments.
+
+        Args:
+            script_name: Name shown in command palette (no .md extension).
+            description: Human-readable explanation stored above the code.
+            js_code: Valid JavaScript using the ea / utils globals.
+            scripts_folder: Vault path matching Excalidraw Settings →
+                            Script Engine folder (default "Excalidraw/Scripts").
+        """
+        return ex.write_ea_script(script_name, description, js_code, scripts_folder=scripts_folder)
+
+    @server.tool("excalidraw_embed_in_note")
+    def excalidraw_embed_in_note(
+        drawing_path: str,
+        note_path: str,
+        heading: str | None = None,
+        width: int | None = None,
+    ) -> dict[str, Any]:
+        """Embed an Excalidraw drawing inline in a markdown note.
+
+        Appends a ![[wikilink]] transclusion so the diagram renders
+        directly in Obsidian's reading view inside the target note.
+        Creates the note if it doesn't exist.
+
+        Use this after excalidraw_generate_architecture or
+        excalidraw_generate_concept_map to surface the diagram inside
+        a relevant index note, runbook, or MOC.
+
+        Args:
+            drawing_path: Vault path of the .excalidraw.md file.
+            note_path: Vault path of the markdown note to embed into.
+            heading: Optional ## heading to insert before the embed.
+            width: Optional pixel width, e.g. 600.
+        """
+        return ex.embed_in_note(drawing_path, note_path, heading=heading, width=width)
+
+    @server.tool("excalidraw_install_scripts")
+    def excalidraw_install_scripts(
+        scripts: list[str] | None = None,
+        scripts_folder: str = "Excalidraw/Scripts",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Install bundled Excalidraw Script Engine scripts into the vault.
+
+        Scripts appear instantly in Obsidian's command palette as
+        "Excalidraw Script: <name>" and can be assigned hotkeys.
+        No Obsidian restart required.
+
+        The bundled scripts include:
+
+        Layout & structure:
+          - Auto Layout          — ELK-powered automatic layout (layered/radial/tree)
+          - Mindmap Builder      — Full interactive mindmap with sidepanel UI
+          - Mindmap format       — Auto-format a left-to-right mindmap
+          - Mindmap connector    — Connect nodes with mindmap-style right-angle lines
+          - Elbow connectors     — Convert arrows to right-angle elbow connectors
+
+        Drawing workflow:
+          - Connect elements     — Connect two selected objects with a bound arrow
+          - Box Selected Elements       — Wrap selection in a bounding box
+          - Box Each Selected Groups    — Box each group individually
+          - Add Next Step in Process    — Prompt + create + connect a process step
+          - Set Dimensions       — Set exact x/y/width/height on an element
+          - Concatenate lines    — Merge two arrows/lines into one
+
+        Conversion & editing:
+          - Convert freedraw to line
+          - Convert selected text elements to sticky notes
+          - Add Connector Point  — Add bullet-point circles to text elements
+          - Copy Selected Element Styles to Global
+
+        Vault linking:
+          - Add Link to Existing File and Open
+          - Add Link to New Page and Open
+          - Deconstruct selected elements into new drawing
+
+        Use excalidraw_list_bundled_scripts for the full list with descriptions.
+
+        Args:
+            scripts: Names to install (None = all). Get names from
+                     excalidraw_list_bundled_scripts.
+            scripts_folder: Vault path matching Excalidraw Settings →
+                            Script Engine folder. Default "Excalidraw/Scripts".
+            overwrite: Replace existing scripts. Default False (skip).
+        """
+        return ex.install_scripts(scripts=scripts, scripts_folder=scripts_folder, overwrite=overwrite)
+
+    @server.tool("excalidraw_list_bundled_scripts")
+    def excalidraw_list_bundled_scripts() -> list[dict[str, str]]:
+        """List all Excalidraw scripts bundled with obsidian-mcp.
+
+        Returns [{name, description}] for each script.
+        Pass name values to excalidraw_install_scripts(scripts=[...])
+        to install a specific subset.
+        """
+        return ex.list_bundled_scripts()
+
+    # ── Kanban ────────────────────────────────────────────────────────
+
+    @server.tool("kanban_create_board")
+    def kanban_create_board(
+        path: str,
+        title: str,
+        lanes: list[dict[str, Any]],
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Kanban board with lanes and cards in one call.
+
+        Produces a .md file with 'kanban-plugin: basic' frontmatter that
+        Obsidian's Kanban plugin renders as a drag-and-drop board.
+
+        Each lane in `lanes` is a dict:
+            {
+                "name": "To Do",
+                "is_done_lane": False,            # optional
+                "cards": [
+                    {
+                        "text": "Set up homelab DNS",
+                        "due": "2026-07-01",       # optional, YYYY-MM-DD
+                        "priority": "high",         # optional: highest|high|low|lowest
+                        "recurrence": None,         # optional, e.g. "every week"
+                        "link": None,               # optional — wikilink target instead of plain text
+                    },
+                    "Plain string cards also work as shorthand",
+                ],
+            }
+
+        Lane order in the list = left-to-right column order on the board.
+        Cards use the same emoji syntax as the Tasks plugin (📅 🔼 🔁 etc.)
+        so they remain queryable by tasks_aggregate and Dataview TASK blocks.
+
+        Set is_done_lane=True on exactly one lane (typically the last) to
+        mark it as the board's "Complete" lane.
+        """
+        return kb.create_board(path, title, lanes, tags=tags)
+
+    @server.tool("kanban_create_simple_board")
+    def kanban_create_simple_board(
+        path: str,
+        title: str,
+        lane_names: list[str],
+        done_lane: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Scaffold an empty Kanban board with just lane headings — no cards yet.
+
+        Use this first when the user wants a board structure before
+        populating it, then call kanban_add_card per card. For a board
+        with cards already known, prefer kanban_create_board instead —
+        it does both steps in a single call.
+
+        Args:
+            lane_names: Lane titles in left-to-right order,
+                        e.g. ["Backlog", "In Progress", "Done"].
+            done_lane: Must exactly match one entry in lane_names.
+                       That lane gets the **Complete** marker.
+        """
+        return kb.create_simple_board(path, title, lane_names, done_lane=done_lane, tags=tags)
+
+    @server.tool("kanban_add_card")
+    def kanban_add_card(
+        board_path: str,
+        lane_name: str,
+        text: str,
+        due: str | None = None,
+        scheduled: str | None = None,
+        priority: str | None = None,
+        recurrence: str | None = None,
+        link: str | None = None,
+    ) -> dict[str, Any]:
+        """Add one card to a lane on an existing Kanban board.
+
+        Creates the lane at the end of the board if it doesn't exist yet.
+        New cards are appended to the bottom of the lane.
+
+        Args:
+            priority: highest | high | low | lowest
+            link: vault note path to render the card as a wikilink instead
+                  of plain text — Kanban shows the linked note's title.
+        """
+        return kb.add_card(
+            board_path, lane_name, text,
+            due=due, scheduled=scheduled, priority=priority,
+            recurrence=recurrence, link=link,
+        )
+
+    @server.tool("kanban_move_card")
+    def kanban_move_card(
+        board_path: str,
+        card_text_fragment: str,
+        target_lane: str,
+    ) -> dict[str, Any]:
+        """Move a card to a different lane, preserving its dates/priority/links.
+
+        Matches the first card whose text contains card_text_fragment
+        (case-insensitive substring match).
+        """
+        return kb.move_card(board_path, card_text_fragment, target_lane)
+
+    @server.tool("kanban_complete_card")
+    def kanban_complete_card(board_path: str, card_text_fragment: str) -> dict[str, Any]:
+        """Mark a card's checkbox as done in place.
+
+        This does NOT move the card to a "Done" lane — Kanban doesn't do
+        that automatically. Call kanban_move_card afterwards if the card
+        should visually move to a done/complete lane.
+        """
+        return kb.complete_card(board_path, card_text_fragment)
+
+    @server.tool("kanban_read_board")
+    def kanban_read_board(board_path: str) -> dict[str, Any]:
+        """Parse a Kanban board into structured lanes and cards.
+
+        Returns {path, lanes: [{name, is_done_lane, cards: [{text, state, raw}]}]}.
+        Use this before kanban_move_card or kanban_add_card if you need to
+        inspect current board state first (e.g. to avoid duplicate cards).
+        """
+        return kb.read_board(board_path)
+
+    @server.tool("kanban_lane_summary")
+    def kanban_lane_summary(board_path: str) -> dict[str, int]:
+        """Return a quick card-count-per-lane summary for a board.
+
+        Useful for status updates without parsing full card detail.
+        """
+        return kb.lane_summary(board_path)
 
     # ── Omnisearch ────────────────────────────────────────────────────
 

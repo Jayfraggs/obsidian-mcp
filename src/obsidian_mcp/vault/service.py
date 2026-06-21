@@ -28,17 +28,12 @@ from __future__ import annotations
 import logging
 import re
 import time
-import shutil
 from pathlib import Path
 from typing import Any
 
 from obsidian_mcp.adapters.base import ObsidianAdapter, RawNote
 from obsidian_mcp.adapters.filesystem import FilesystemAdapter
-from obsidian_mcp.errors import (
-    NoteAlreadyExistsError,
-    NoteNotFoundError,
-    VaultOperationError,
-)
+from obsidian_mcp.errors import NoteAlreadyExistsError, NoteNotFoundError
 from obsidian_mcp.vault.index import BacklinkIndex
 from obsidian_mcp.vault.metadata import extract_note_metadata
 from obsidian_mcp.vault.paths import VaultPathResolver
@@ -198,58 +193,6 @@ class VaultService:
     def list_folders(self) -> list[str]:
         """List all folders in the vault."""
         return self._adapter.list_folders()
-
-    def delete_folder(self, path: str, *, recursive: bool = False, confirm: bool = False) -> dict[str, Any]:
-        """Delete a folder inside the vault.
-
-        This operation is destructive and therefore requires explicit
-        confirmation via ``confirm=True``. If ``recursive`` is False the
-        folder must be empty (no files or subfolders) or a
-        ``VaultOperationError`` is raised. When ``recursive=True`` all files
-        inside the folder (including non-`.md` assets) are removed via the
-        adapter; for the filesystem backend the directory tree is then
-        removed as well.
-        """
-        if not confirm:
-            raise VaultOperationError(
-                "Folder deletion requires explicit confirmation. Pass confirm=True to proceed."
-            )
-        folder_path = self.resolver.resolve_relative_path(path)
-        vault_rel = self.resolver.to_vault_relative(folder_path)
-
-        # Never allow deleting the vault root itself
-        if folder_path == self.resolver.vault_path:
-            raise VaultOperationError("Refusing to delete the vault root directory.")
-
-        if not folder_path.exists() or not folder_path.is_dir():
-            raise VaultOperationError("Folder was not found.")
-
-        prefix = f"{vault_rel}/"
-        files_in_folder = [f for f in self.list_files() if f.startswith(prefix)]
-
-        if files_in_folder and not recursive:
-            raise VaultOperationError("Folder is not empty. Use recursive=True to delete.")
-
-        # Delete files via the adapter (works for .md and other files).
-        for rel in files_in_folder:
-            try:
-                self._adapter.delete_note(rel)
-            except Exception as exc:  # adapter-level errors -> surface as VaultOperationError
-                raise VaultOperationError(f"Failed to delete file '{rel}'.", internal_detail=str(exc))
-            else:
-                if rel.endswith(".md"):
-                    # Update backlink index eagerly
-                    self._index._remove_file(rel)
-
-        # If using the filesystem backend, remove the directory tree
-        if isinstance(self._adapter, FilesystemAdapter):
-            try:
-                shutil.rmtree(folder_path)
-            except Exception as exc:
-                raise VaultOperationError("Failed to remove folder on disk.", internal_detail=str(exc))
-
-        self._invalidate_file_list()
-        return {"path": vault_rel, "deleted": True}
 
     def search_notes(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search markdown notes using the adapter's fuzzy ranking."""

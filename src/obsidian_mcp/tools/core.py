@@ -11,7 +11,6 @@ CORE_TOOL_NAMES = (
     "update_note",
     "append_note",
     "delete_note",
-    "delete_folder",
     "move_note",
     "rename_note",
     "search_notes",
@@ -91,13 +90,3 @@ def register_core_tools(
     def list_folders():
         """List folders in the configured Obsidian vault."""
         return service.list_folders()
-
-    @server.tool("delete_folder")
-    def delete_folder(path: str, recursive: bool = False, confirm: bool = False):
-        """Delete a folder in the configured Obsidian vault.
-
-        This is a destructive operation. You MUST pass ``confirm=True`` to
-        actually delete the folder. Set ``recursive=True`` to remove
-        non-empty folders.
-        """
-        return service.delete_folder(path, recursive=recursive, confirm=confirm)

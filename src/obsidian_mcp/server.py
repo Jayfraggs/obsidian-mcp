@@ -5,9 +5,30 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import base64
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Icon
 
 from obsidian_mcp.config import ObsidianMCPSettings
+
+# Load and encode the bundled icon once at import time.
+# Stored as a 96×96 PNG alongside this module.
+def _load_icon() -> Icon | None:
+    icon_path = Path(__file__).parent / "icon.png"
+    try:
+        data = icon_path.read_bytes()
+        b64 = base64.b64encode(data).decode()
+        return Icon(
+            src=f"data:image/png;base64,{b64}",
+            mimeType="image/png",
+            sizes=["96x96"],
+        )
+    except Exception:
+        return None
+
+_ICON = _load_icon()
 from obsidian_mcp.logging import get_logger
 from obsidian_mcp.vault.service import VaultService
 
@@ -40,6 +61,7 @@ def create_server(
     server = FastMCP(
         settings.server_name,
         instructions=system_prompt or _default_instructions(),
+        icons=[_ICON] if _ICON is not None else None,
     )
     for registrar in tool_registrars:
         registrar(server, settings, vault_service=vault_service)
