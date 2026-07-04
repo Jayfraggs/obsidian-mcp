@@ -14,6 +14,8 @@ class ErrorCode(StrEnum):
     NOTE_ALREADY_EXISTS = "note_already_exists"
     VAULT_OPERATION_FAILED = "vault_operation_failed"
     PERMISSION_DENIED = "permission_denied"
+    STRING_NOT_FOUND = "string_not_found"
+    STRING_NOT_UNIQUE = "string_not_unique"
 
 
 class PublicErrorPayload(TypedDict):
@@ -107,6 +109,28 @@ class PermissionDeniedError(ApplicationError):
     def __init__(self, message: str, *, internal_detail: str | None = None) -> None:
         super().__init__(
             code=ErrorCode.PERMISSION_DENIED,
+            message=message,
+            internal_detail=internal_detail,
+        )
+
+
+class StringNotFoundError(ApplicationError):
+    """Raised when a str_replace target string does not occur in the note."""
+
+    def __init__(self, message: str, *, internal_detail: str | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.STRING_NOT_FOUND,
+            message=message,
+            internal_detail=internal_detail,
+        )
+
+
+class StringNotUniqueError(ApplicationError):
+    """Raised when a str_replace target string occurs more than once in the note."""
+
+    def __init__(self, message: str, *, internal_detail: str | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.STRING_NOT_UNIQUE,
             message=message,
             internal_detail=internal_detail,
         )

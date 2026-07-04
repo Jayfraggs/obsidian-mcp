@@ -117,9 +117,22 @@ class KnowledgeService:
         """Detect likely duplicate notes."""
         return detect_duplicate_notes(self._documents(), threshold=threshold)
 
-    def build_relationship_graph(self) -> dict[str, list[dict[str, Any]]]:
-        """Build a relationship graph across markdown notes."""
-        return build_graph(self._documents())
+    def build_relationship_graph(
+        self,
+        *,
+        include_tag_edges: bool = False,
+        max_tag_edges_per_note: int = 10,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Build a relationship graph across markdown notes.
+
+        include_tag_edges defaults to False — see build_relationship_graph
+        in knowledge/analysis.py for why shared-tag edges are opt-in.
+        """
+        return build_graph(
+            self._documents(),
+            include_tag_edges=include_tag_edges,
+            max_tag_edges_per_note=max_tag_edges_per_note,
+        )
 
     def suggest_para_location(self, path: str) -> dict[str, str]:
         """Suggest a PARA bucket and folder for a note."""

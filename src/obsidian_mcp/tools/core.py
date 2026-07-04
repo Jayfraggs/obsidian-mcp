@@ -10,6 +10,8 @@ CORE_TOOL_NAMES = (
     "create_note",
     "update_note",
     "append_note",
+    "str_replace_note",
+    "str_replace_vault",
     "delete_note",
     "move_note",
     "rename_note",
@@ -60,6 +62,50 @@ def register_core_tools(
     def append_note(path: str, content: str):
         """Append content to a markdown note."""
         return service.append_note(path, content)
+
+    @server.tool("str_replace_note")
+    def str_replace_note(path: str, old_str: str, new_str: str = ""):
+        """Replace one exact occurrence of old_str with new_str in a single note.
+
+        Use this instead of update_note when changing a small part of a
+        note — it avoids resending the entire note content and is safer:
+        old_str must match the raw note content exactly and occur exactly
+        once, or the call fails with an error rather than guessing.
+
+        If old_str occurs more than once, add more surrounding context
+        (e.g. a preceding heading or line) to make it unique before retrying.
+        """
+        return service.str_replace_note(path, old_str, new_str)
+
+    @server.tool("str_replace_vault")
+    def str_replace_vault(
+        old_str: str,
+        new_str: str = "",
+        require_unique_per_note: bool = True,
+        path_glob: str | None = None,
+    ):
+        """Replace old_str with new_str across every matching note in the vault.
+
+        Best-effort batch operation — one note failing to match does not
+        abort the rest. Use path_glob (a substring of the vault path, e.g.
+        "Projects/") to scope the replacement to a folder.
+
+        By default (require_unique_per_note=True) any note where old_str
+        occurs more than once is SKIPPED and listed under "ambiguous" in
+        the result, rather than guessing which occurrence to change.
+        Set require_unique_per_note=False only when you specifically want
+        every occurrence replaced everywhere it appears — e.g. a vault-wide
+        rename of a term you've confirmed is unambiguous in context.
+
+        Returns {updated: [...], ambiguous: [...], unchanged_count: N}.
+        Review "ambiguous" and consider str_replace_note with extra
+        context for those notes individually.
+        """
+        return service.str_replace_vault(
+            old_str, new_str,
+            require_unique_per_note=require_unique_per_note,
+            path_glob=path_glob,
+        )
 
     @server.tool("delete_note")
     def delete_note(path: str):

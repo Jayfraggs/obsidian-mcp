@@ -133,27 +133,88 @@ def suggest_tags(
     return sorted(suggestions, key=lambda item: (-item["score"], item["tag"]))[:limit]
 
 
-def build_relationship_graph(documents: list[NoteDocument]) -> dict[str, list[dict[str, Any]]]:
-    """Build a local relationship graph from links and shared tags."""
+def build_relationship_graph(
+    documents: list[NoteDocument],
+    *,
+    include_tag_edges: bool = False,
+    max_tag_edges_per_note: int = 10,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build a local relationship graph from links and (optionally) shared tags.
+
+    Parameters
+    ----------
+    include_tag_edges:
+        If True, also emit edges between notes that share a tag. Defaults
+        to False — on a tag-heavy vault, shared-tag edges grow roughly
+        quadratically with note count and can blow up the response past
+        MCP/transport size limits (observed: 500 notes with ~4 shared
+        tags each → 67k edges, 5+ MB JSON). Link edges from actual
+        [[wikilinks]] are the meaningful graph in almost all cases;
+        tag edges are a "nice to have" that doesn't scale.
+    max_tag_edges_per_note:
+        When include_tag_edges=True, caps how many tag-edges originate
+        from any single note (the busiest shared tag wins ties last).
+        Prevents one popular tag (e.g. #homelab) from single-handedly
+        re-introducing the blowup this function exists to avoid.
+    """
     nodes = [{"id": doc.path, "title": doc.title, "tags": doc.tags} for doc in documents]
     title_to_path = {doc.title: doc.path for doc in documents}
     stem_to_path = {doc.path.removesuffix(".md").split("/")[-1]: doc.path for doc in documents}
+    all_paths = {doc.path for doc in documents}
     edges: list[dict[str, Any]] = []
 
     for doc in documents:
         for link in doc.links:
             target = title_to_path.get(link) or stem_to_path.get(link) or (
-                f"{link}.md" if f"{link}.md" in {item.path for item in documents} else None
+                f"{link}.md" if f"{link}.md" in all_paths else None
             )
             if target and target != doc.path:
                 edges.append({"source": doc.path, "target": target, "type": "link"})
 
-    for index, first in enumerate(documents):
-        for second in documents[index + 1 :]:
-            for tag in sorted(set(first.tags) & set(second.tags)):
-                edges.append({"source": first.path, "target": second.path, "type": "tag", "tag": tag})
+    if include_tag_edges:
+        edges.extend(_build_tag_edges(documents, max_tag_edges_per_note))
 
     return {"nodes": nodes, "edges": _dedupe_edges(edges)}
+
+
+def _build_tag_edges(
+    documents: list[NoteDocument],
+    max_tag_edges_per_note: int,
+) -> list[dict[str, Any]]:
+    """Generate shared-tag edges in O(N · avg_tags) instead of O(N²).
+
+    Groups notes by tag first, then connects within each tag's bucket —
+    mathematically equivalent to the pairwise comparison but without ever
+    materialising the full N×N comparison space. Still bounded per-note
+    via max_tag_edges_per_note since a single popular tag with hundreds
+    of notes would otherwise produce a complete graph on its own.
+    """
+    tag_buckets: dict[str, list[str]] = {}
+    for doc in documents:
+        for tag in doc.tags:
+            tag_buckets.setdefault(tag, []).append(doc.path)
+
+    edge_count_per_note: dict[str, int] = {}
+    edges: list[dict[str, Any]] = []
+
+    for tag, paths in tag_buckets.items():
+        if len(paths) < 2:
+            continue
+        # Cap bucket size: an enormous shared tag is not useful signal
+        # and would otherwise dominate every note's edge budget.
+        for i, source in enumerate(paths):
+            if edge_count_per_note.get(source, 0) >= max_tag_edges_per_note:
+                continue
+            for target in paths[i + 1:]:
+                if edge_count_per_note.get(source, 0) >= max_tag_edges_per_note:
+                    break
+                if edge_count_per_note.get(target, 0) >= max_tag_edges_per_note:
+                    continue
+                edges.append({"source": source, "target": target, "type": "tag", "tag": tag})
+                edge_count_per_note[source] = edge_count_per_note.get(source, 0) + 1
+                edge_count_per_note[target] = edge_count_per_note.get(target, 0) + 1
+
+    return edges
 
 
 def build_dataview_dashboard(title: str, tags: list[str]) -> str:

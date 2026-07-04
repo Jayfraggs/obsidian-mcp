@@ -33,7 +33,12 @@ from typing import Any
 
 from obsidian_mcp.adapters.base import ObsidianAdapter, RawNote
 from obsidian_mcp.adapters.filesystem import FilesystemAdapter
-from obsidian_mcp.errors import NoteAlreadyExistsError, NoteNotFoundError
+from obsidian_mcp.errors import (
+    NoteAlreadyExistsError,
+    NoteNotFoundError,
+    StringNotFoundError,
+    StringNotUniqueError,
+)
 from obsidian_mcp.vault.index import BacklinkIndex
 from obsidian_mcp.vault.metadata import extract_note_metadata
 from obsidian_mcp.vault.paths import VaultPathResolver
@@ -135,6 +140,133 @@ class VaultService:
         # Re-index: appended content may add new wikilinks
         self._index._update_file(note_path)
         return self._note_payload(vault_rel, updated.content)
+
+    def str_replace_note(
+        self,
+        path: str,
+        old_str: str,
+        new_str: str = "",
+    ) -> dict[str, Any]:
+        """Replace one exact occurrence of *old_str* with *new_str* in a note.
+
+        Mirrors the computer-use str_replace tool: *old_str* must match the
+        raw note content exactly and appear exactly once. This avoids the
+        cost and risk of resending an entire note via update_note just to
+        change one line — and the uniqueness check prevents silently
+        editing the wrong occurrence when a phrase repeats.
+
+        Raises
+        ------
+        NoteNotFoundError
+            If the note does not exist.
+        StringNotFoundError
+            If old_str does not occur anywhere in the note.
+        StringNotUniqueError
+            If old_str occurs more than once — the caller must supply
+            more surrounding context to make the match unique.
+        """
+        note_path = self.resolver.resolve_note_path(path)
+        vault_rel = self.resolver.to_vault_relative(note_path)
+        raw = self._adapter.read_note(vault_rel)
+        if not raw.exists:
+            raise NoteNotFoundError("Note was not found.")
+
+        occurrences = raw.content.count(old_str)
+        if occurrences == 0:
+            raise StringNotFoundError(
+                f"old_str was not found in '{vault_rel}'.",
+                internal_detail=f"old_str={old_str!r}",
+            )
+        if occurrences > 1:
+            raise StringNotUniqueError(
+                f"old_str occurs {occurrences} times in '{vault_rel}' — it must be unique. "
+                "Include more surrounding context in old_str to disambiguate.",
+                internal_detail=f"old_str={old_str!r} occurrences={occurrences}",
+            )
+
+        new_content = raw.content.replace(old_str, new_str, 1)
+        self._adapter.write_note(vault_rel, new_content)
+        self._index._update_file(note_path)
+        return self._note_payload(vault_rel, new_content)
+
+    def str_replace_vault(
+        self,
+        old_str: str,
+        new_str: str = "",
+        *,
+        require_unique_per_note: bool = True,
+        path_glob: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace *old_str* with *new_str* across every matching note in the vault.
+
+        Unlike str_replace_note, this is a best-effort batch operation:
+        one note failing to match does not abort the rest. Every note is
+        attempted and the outcome is reported per-path.
+
+        Parameters
+        ----------
+        old_str:
+            Exact text to search for in each note.
+        new_str:
+            Replacement text.
+        require_unique_per_note:
+            If True (default), a note where old_str occurs more than once
+            is skipped and reported under "ambiguous" rather than guessing
+            which occurrence to replace. If False, ALL occurrences in a
+            matching note are replaced (str.replace with no count limit) —
+            use this only when you specifically want a global substitution
+            and have verified old_str is unambiguous in context.
+        path_glob:
+            Optional substring filter — only notes whose vault-relative
+            path contains this substring are considered. Pass a folder
+            prefix (e.g. "Projects/") to scope the replacement.
+
+        Returns
+        -------
+        dict with keys:
+            updated    — list of vault-relative paths successfully changed
+            ambiguous  — list of paths skipped due to >1 occurrence
+                         (only populated when require_unique_per_note=True)
+            unchanged  — count of notes scanned with zero occurrences
+        """
+        updated: list[str] = []
+        ambiguous: list[str] = []
+        unchanged_count = 0
+
+        for file_path in self.list_files():
+            if not file_path.endswith(".md"):
+                continue
+            if path_glob and path_glob not in file_path:
+                continue
+
+            raw = self._adapter.read_note(file_path)
+            if not raw.exists:
+                continue
+
+            occurrences = raw.content.count(old_str)
+            if occurrences == 0:
+                unchanged_count += 1
+                continue
+
+            if occurrences > 1 and require_unique_per_note:
+                ambiguous.append(file_path)
+                continue
+
+            count = 1 if require_unique_per_note else -1  # -1 = replace all (str.replace semantics)
+            new_content = raw.content.replace(old_str, new_str, count) if count > 0 else raw.content.replace(old_str, new_str)
+            self._adapter.write_note(file_path, new_content)
+            note_path = self.resolver.resolve_note_path(file_path)
+            self._index._update_file(note_path)
+            updated.append(file_path)
+
+        if updated:
+            self._invalidate_file_list()
+
+        return {
+            "updated": updated,
+            "ambiguous": ambiguous,
+            "unchanged_count": unchanged_count,
+        }
 
     def delete_note(self, path: str) -> dict[str, Any]:
         """Delete a markdown note."""

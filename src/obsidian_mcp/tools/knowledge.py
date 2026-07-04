@@ -90,9 +90,28 @@ def register_knowledge_tools(
         return knowledge_service.detect_duplicates(threshold)
 
     @server.tool("build_relationship_graph")
-    def build_relationship_graph():
-        """Build a relationship graph across markdown notes. Uses cached in-memory reads — will not time out."""
-        return knowledge_service.build_relationship_graph()
+    def build_relationship_graph(
+        include_tag_edges: bool = False,
+        max_tag_edges_per_note: int = 10,
+    ):
+        """Build a relationship graph across markdown notes. Uses cached in-memory reads — will not time out.
+
+        By default only [[wikilink]] edges are included. Set
+        include_tag_edges=True to also connect notes that share a tag —
+        but be aware this can produce a very large response on vaults
+        with many notes sharing common tags (shared-tag edges scale up
+        to O(N²) before capping). max_tag_edges_per_note bounds how many
+        tag-edges any single note can contribute, to keep response size
+        manageable even with include_tag_edges=True.
+
+        If you previously hit a response-size failure on this tool, call
+        it with the defaults (link edges only) first — it should now stay
+        well under any size limit regardless of vault size.
+        """
+        return knowledge_service.build_relationship_graph(
+            include_tag_edges=include_tag_edges,
+            max_tag_edges_per_note=max_tag_edges_per_note,
+        )
 
     @server.tool("suggest_para_location")
     def suggest_para_location(path: str):
