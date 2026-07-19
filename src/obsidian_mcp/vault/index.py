@@ -123,13 +123,7 @@ class BacklinkIndex:
         # Debounce state
         self._dirty = False
         self._persist_timer: threading.Timer | None = None
-        # Clean up any stale PID-stamped .tmp files left by previous crashes.
-        # Each process uses its own .tmp name so concurrent instances don't collide.
-        try:
-            for stale in self._cache_path.parent.glob(f"{self._cache_path.stem}.*.tmp"):
-                stale.unlink(missing_ok=True)
-        except OSError:
-            pass
+        
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -309,45 +303,43 @@ class BacklinkIndex:
         )
         return float(saved_at), forward
 
-    def _persist_now(self) -> None:
-        """Write the cache to disk immediately. Never raises.
+def _persist_now(self) -> None:
+    """Write the cache to disk immediately. Never raises.
 
-        Uses a PID-stamped .tmp file so concurrent MCP server processes
-        (e.g. two Claude Desktop windows on the same vault) never collide
-        on the same temp path.
-        """
-        try:
-            with self._lock:
-                forward_snapshot = {
-                    path: sorted(stems)
-                    for path, stems in self._forward.items()
-                }
-            payload = {
-                "version": _INDEX_VERSION,
-                "vault": str(self._vault),
-                "saved_at": time.time(),
-                "forward": forward_snapshot,
+    Uses direct write instead of tmp→rename to avoid WinError 5
+    (Access Denied) on Windows when antivirus or ACL restrictions
+    block rename operations in %TEMP%. The trade-off is a small
+    window where a crash mid-write could corrupt the cache — but
+    the cache is always validated on load and falls back to a full
+    vault scan if corrupt, so this is safe.
+    """
+    try:
+        with self._lock:
+            forward_snapshot = {
+                path: sorted(stems)
+                for path, stems in self._forward.items()
             }
-            # PID-stamped tmp: each process writes its own file, so two
-            # concurrent instances never fight over the same handle.
-            tmp = self._cache_path.with_suffix(f".{os.getpid()}.tmp")
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            tmp.write_text(json.dumps(payload, indent=None, separators=(",", ":")), encoding="utf-8")
-            # Windows won't rename over an existing open file — delete dest first.
-            # Last writer wins; both processes write the same logical content so
-            # correctness is unaffected.
-            try:
-                self._cache_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            tmp.replace(self._cache_path)
-            self._dirty = False
-            logger.debug("BacklinkIndex: persisted %d entries to %s", len(forward_snapshot), self._cache_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("BacklinkIndex: failed to persist cache: %s", exc)
+        payload = {
+            "version": _INDEX_VERSION,
+            "vault": str(self._vault),
+            "saved_at": time.time(),
+            "forward": forward_snapshot,
+        }
+        json_str = json.dumps(payload, indent=None, separators=(",", ":"))
+
+        # Direct write — no tmp file, no rename.
+        # Avoids WinError 5 (Access Denied) caused by antivirus/ACL
+        # blocking renames in %TEMP% on Windows.
+        self._cache_path.write_text(json_str, encoding="utf-8")
+
+        self._dirty = False
+        logger.debug(
+            "BacklinkIndex: persisted %d entries to %s",
+            len(forward_snapshot),
+            self._cache_path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("BacklinkIndex: failed to persist cache: %s", exc)
 
     def _schedule_persist(self) -> None:
         """Mark dirty and (re)start the debounce timer."""
