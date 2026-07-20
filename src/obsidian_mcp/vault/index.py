@@ -50,7 +50,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 import tempfile
 import threading
@@ -200,7 +199,11 @@ class BacklinkIndex:
             self._reverse = reverse
             self._built = True
 
-        logger.info("BacklinkIndex: full scan done — %d notes, %d link targets", count, len(reverse))
+        logger.info(
+            "BacklinkIndex: full scan done - %d notes, %d link targets",
+            count,
+            len(reverse),
+        )
 
     def _build_incremental(
         self,
@@ -303,43 +306,43 @@ class BacklinkIndex:
         )
         return float(saved_at), forward
 
-def _persist_now(self) -> None:
-    """Write the cache to disk immediately. Never raises.
+    def _persist_now(self) -> None:
+        """Write the cache to disk immediately. Never raises.
 
-    Uses direct write instead of tmp→rename to avoid WinError 5
-    (Access Denied) on Windows when antivirus or ACL restrictions
-    block rename operations in %TEMP%. The trade-off is a small
-    window where a crash mid-write could corrupt the cache — but
-    the cache is always validated on load and falls back to a full
-    vault scan if corrupt, so this is safe.
-    """
-    try:
-        with self._lock:
-            forward_snapshot = {
-                path: sorted(stems)
-                for path, stems in self._forward.items()
+        Uses direct write instead of tmp->rename to avoid WinError 5
+        (Access Denied) on Windows when antivirus or ACL restrictions
+        block rename operations in %TEMP%. The trade-off is a small
+        window where a crash mid-write could corrupt the cache, but
+        the cache is always validated on load and falls back to a full
+        vault scan if corrupt, so this is safe.
+        """
+        try:
+            with self._lock:
+                forward_snapshot = {
+                    path: sorted(stems)
+                    for path, stems in self._forward.items()
+                }
+            payload = {
+                "version": _INDEX_VERSION,
+                "vault": str(self._vault),
+                "saved_at": time.time(),
+                "forward": forward_snapshot,
             }
-        payload = {
-            "version": _INDEX_VERSION,
-            "vault": str(self._vault),
-            "saved_at": time.time(),
-            "forward": forward_snapshot,
-        }
-        json_str = json.dumps(payload, indent=None, separators=(",", ":"))
+            json_str = json.dumps(payload, indent=None, separators=(",", ":"))
 
-        # Direct write — no tmp file, no rename.
-        # Avoids WinError 5 (Access Denied) caused by antivirus/ACL
-        # blocking renames in %TEMP% on Windows.
-        self._cache_path.write_text(json_str, encoding="utf-8")
+            # Direct write: no tmp file, no rename.
+            # Avoids WinError 5 (Access Denied) caused by antivirus/ACL
+            # blocking renames in %TEMP% on Windows.
+            self._cache_path.write_text(json_str, encoding="utf-8")
 
-        self._dirty = False
-        logger.debug(
-            "BacklinkIndex: persisted %d entries to %s",
-            len(forward_snapshot),
-            self._cache_path,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("BacklinkIndex: failed to persist cache: %s", exc)
+            self._dirty = False
+            logger.debug(
+                "BacklinkIndex: persisted %d entries to %s",
+                len(forward_snapshot),
+                self._cache_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BacklinkIndex: failed to persist cache: %s", exc)
 
     def _schedule_persist(self) -> None:
         """Mark dirty and (re)start the debounce timer."""
