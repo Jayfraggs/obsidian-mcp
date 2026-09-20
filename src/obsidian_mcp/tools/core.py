@@ -1,6 +1,6 @@
 """Core MCP tool registration for Obsidian vault operations."""
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from obsidian_mcp.config import ObsidianMCPSettings
 from obsidian_mcp.vault.service import VaultService
@@ -83,28 +83,87 @@ def register_core_tools(
         new_str: str = "",
         require_unique_per_note: bool = True,
         path_glob: str | None = None,
+        whole_word: bool = False,
+        case_sensitive: bool = True,
+        dry_run: bool = True,
+        backup: bool = False,
+        exception_rules: list[dict[str, Any]] | None = None,
     ):
         """Replace old_str with new_str across every matching note in the vault.
 
-        Best-effort batch operation — one note failing to match does not
-        abort the rest. Use path_glob (a substring of the vault path, e.g.
-        "Projects/") to scope the replacement to a folder.
+        ALWAYS runs as dry_run=True by default — set dry_run=False only after
+        reviewing the preview output. No files are written during a dry run.
 
-        By default (require_unique_per_note=True) any note where old_str
-        occurs more than once is SKIPPED and listed under "ambiguous" in
-        the result, rather than guessing which occurrence to change.
-        Set require_unique_per_note=False only when you specifically want
-        every occurrence replaced everywhere it appears — e.g. a vault-wide
-        rename of a term you've confirmed is unambiguous in context.
+        Parameters
+        ----------
+        old_str:
+            The exact string to find and replace.
+        new_str:
+            The replacement string. Pass "" to delete old_str.
+        require_unique_per_note:
+            Default True — skip notes where old_str appears more than once,
+            reporting them under "ambiguous". Set False to replace ALL
+            occurrences in every matched note.
+        path_glob:
+            Limit scope to notes whose vault-relative path contains this
+            substring. E.g. "Projects/" scopes to the Projects folder only.
+        whole_word:
+            Default False. When True, only match old_str when it is not
+            immediately preceded or followed by a letter or digit.
+            Correct for hyphenated model names like "DeepSeek-V4-Flash"
+            (standard \\b word boundaries break at hyphens and are NOT used).
+        case_sensitive:
+            Default True. Set False for case-insensitive matching.
+        dry_run:
+            Default True. When True, returns a full preview of what would
+            change without touching any files. Set False to commit changes.
+        backup:
+            Default False. When True (and dry_run=False), copies each
+            affected note to .mcp-backups/<timestamp>/ inside the vault
+            before overwriting. Ignored during dry runs.
+        exception_rules:
+            List of rule dicts. A note matching ANY rule is skipped entirely.
+            Each dict must have "type" and "value" keys.
 
-        Returns {updated: [...], ambiguous: [...], unchanged_count: N}.
-        Review "ambiguous" and consider str_replace_note with extra
-        context for those notes individually.
+            Rule types:
+              "folder"          — skip notes inside this folder name
+                                  {"type": "folder", "value": "30-References"}
+              "tag"             — skip notes with this Obsidian tag
+                                  {"type": "tag", "value": "#archived"}
+              "frontmatter"     — skip notes whose YAML frontmatter contains
+                                  this key:value substring
+                                  {"type": "frontmatter", "value": "status: locked"}
+              "path_glob"       — skip notes whose path contains this substring
+                                  {"type": "path_glob", "value": "Templates"}
+              "contains_string" — skip notes containing this sentinel string
+                                  {"type": "contains_string", "value": "DO NOT EDIT"}
+
+        Returns
+        -------
+        {
+          "dry_run": bool,
+          "updated": [list of paths changed / would change],
+          "skipped": [{"path": ..., "reason": ...}, ...],
+          "ambiguous": [list of paths skipped due to multiple occurrences],
+          "unchanged_count": int,
+          "backup_dir": str or null
+        }
+
+        Recommended workflow:
+          1. str_replace_vault(old_str=..., new_str=..., dry_run=True)
+          2. Review "updated", "skipped", "ambiguous" in the result.
+          3. If satisfied: str_replace_vault(..., dry_run=False, backup=True)
         """
         return service.str_replace_vault(
-            old_str, new_str,
+            old_str,
+            new_str,
             require_unique_per_note=require_unique_per_note,
             path_glob=path_glob,
+            whole_word=whole_word,
+            case_sensitive=case_sensitive,
+            dry_run=dry_run,
+            backup=backup,
+            exception_rules=exception_rules,
         )
 
     @server.tool("delete_note")

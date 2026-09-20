@@ -163,3 +163,55 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 - `MOCRequest`: API model for MOC creation.
 - `AtomicNoteRequest`: API model for atomic note creation.
 - `DashboardRequest`: API model for Dataview dashboard creation.
+
+---
+
+## Setup & Launcher Scripts (repo root)
+
+Added 2026-09-20. These are standalone scripts, not part of the `obsidian_mcp`
+package. They have no import relationship with `src/` — they invoke the server
+as a subprocess via `uv run obsidian-mcp`.
+
+### `setup_wizard.py`
+
+- `get_os() -> str`: Returns `"windows"`, `"mac"`, or `"linux"`.
+- `get_claude_desktop_config_path() -> Path | None`: OS-specific path to `claude_desktop_config.json`.
+- `get_project_root() -> Path`: Directory of `setup_wizard.py` (repo root).
+- `get_env_path() -> Path`: `project_root / ".env"`.
+- `get_uv_exe() -> str | None`: `shutil.which("uv")`.
+- `write_env(fields: dict[str, str]) -> None`: Writes `.env` file with header.
+- `merge_claude_desktop_config(server_command: list[str], env_vars: dict[str, str]) -> tuple[bool, str]`: Merge-safe update of Claude Desktop JSON config. Atomic write via `.tmp` rename.
+- `install_uv() -> tuple[bool, str]`: Runs official uv installer for current OS.
+- `run_uv_sync(log_callback: Callable) -> tuple[bool, str]`: Runs `uv sync`, streams output to callback.
+- `create_desktop_shortcut(server_mode: bool = False) -> bool`: Creates OS-native desktop shortcut to wizard or launcher.
+- `_note_matches_exception(...)`: Internal — checks a single exception rule against a note. (In `vault/service.py`.)
+- `SetupWizard(ctk.CTk)`: 7-step GUI wizard. Methods: `_show_step`, `_go_next`, `_go_back`, `_validate_step`, `_page_*`, `_run_install`, `_build_env_dict`, `_build_server_command`.
+
+### `server_launcher.py`
+
+- `get_os() -> str`: Same as above (duplicated for script independence).
+- `get_project_root() -> Path`: Directory of `server_launcher.py`.
+- `get_uv_exe() -> str`: Returns path or `"uv"` fallback string.
+- `build_server_command() -> list[str]`: `[uv, "--directory", root, "run", "obsidian-mcp"]`.
+- `_make_tray_image(color: str) -> PIL.Image`: Draws 64×64 tray icon programmatically.
+- `ServerProcess`: Subprocess manager. Methods: `start`, `stop`, `restart`, `is_running`. Callbacks: `on_log(str)`, `on_status_change(str)`. Status values: `"stopped"`, `"running"`, `"error"`.
+- `StatusPanel(ctk.CTkToplevel)`: Floating status window. Thread-safe methods: `append_log(str)`, `update_status(str)`. `_on_close` withdraws instead of destroying.
+- `TrayController`: Owns root, icon, panel. `run()` blocks until quit. `_open_panel` always dispatches to tkinter thread via `root.after`.
+
+### `_test_/unit/test_setup_wizard.py`
+
+- 31 tests covering OS detection, config path resolution, `.env` write,
+  Claude Desktop JSON merge (including merge-safety and atomic write),
+  server command construction, `ServerProcess` lifecycle, desktop shortcut
+  creation per OS, `install_uv`, and `run_uv_sync`.
+- All GUI modules mocked at import time — tests are fully headless.
+
+### `vault/service.py` additions (2026-09-20)
+
+- `ExceptionRule`: `TypedDict` with keys `type: str` and `value: str`. Valid types: `folder`, `tag`, `frontmatter`, `path_glob`, `contains_string`.
+- `_note_matches_exception(vault_rel, content, rules) -> tuple[bool, str]`: Returns `(True, reason)` if any rule matches (OR logic), `(False, "")` otherwise.
+- `_build_search_pattern(old_str, *, whole_word, case_sensitive) -> re.Pattern`: Compiles search pattern. `whole_word=True` uses `(?<![A-Za-z0-9\-])..(?![A-Za-z0-9\-])` lookarounds (safe for hyphenated identifiers like `DeepSeek-V4-Flash`).
+- `_apply_replacement(content, pattern, new_str, *, require_unique_per_note) -> tuple[str | None, str | None]`: Returns `(new_content, None)` on success, `(None, None)` if no match, `(None, reason)` if ambiguous.
+- `VaultService.str_replace_vault(...)`: Extended with `whole_word`, `case_sensitive`, `dry_run`, `backup`, `exception_rules` parameters. Returns `{dry_run, updated, skipped, ambiguous, unchanged_count, backup_dir}`.
+- `VaultService._backup_note(vault_rel, content, backup_root)`: Writes note content to `.mcp-backups/<timestamp>/<vault_rel>` before overwriting.
+- Backup directory constant: `_BACKUP_DIR = ".mcp-backups"`.

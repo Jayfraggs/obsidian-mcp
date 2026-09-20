@@ -12,17 +12,23 @@ plugin-native markdown that Obsidian can read and render without any extra confi
 
 1. [Requirements](#requirements)
 2. [Installation](#installation)
+   - [Option A — Setup Wizard (recommended)](#option-a--setup-wizard-recommended)
+   - [Option B — uv (manual)](#option-b--uv-manual)
+   - [Option C — pip (manual)](#option-c--pip-manual)
 3. [Configuration](#configuration)
-4. [Connect to Claude Desktop](#connect-to-claude-desktop)
-5. [Connect to other LLMs](#connect-to-other-llms)
-6. [Web UI](#web-ui)
-7. [Obsidian Local REST API plugin (optional)](#obsidian-local-rest-api-plugin)
-8. [AI Rules system](#ai-rules-system)
-9. [Plugin reference](#plugin-reference)
-10. [Vault adapter modes](#vault-adapter-modes)
-11. [Permission profiles](#permission-profiles)
-12. [Troubleshooting](#troubleshooting)
-13. [Developer docs](#developer-docs)
+4. [Running the server](#running-the-server)
+   - [Server Launcher (GUI)](#server-launcher-gui)
+   - [Command line](#command-line)
+5. [Connect to Claude Desktop](#connect-to-claude-desktop)
+6. [Connect to other LLMs](#connect-to-other-llms)
+7. [Web UI](#web-ui)
+8. [Obsidian Local REST API plugin (optional)](#obsidian-local-rest-api-plugin)
+9. [AI Rules system](#ai-rules-system)
+10. [Plugin reference](#plugin-reference)
+11. [Vault adapter modes](#vault-adapter-modes)
+12. [Permission profiles](#permission-profiles)
+13. [Troubleshooting](#troubleshooting)
+14. [Developer docs](#developer-docs)
 
 ---
 
@@ -33,31 +39,70 @@ plugin-native markdown that Obsidian can read and render without any extra confi
 | Python | **3.11** |
 | uv (recommended) or pip | any recent |
 | Obsidian | any version (vault is plain markdown) |
-| Claude Desktop | any current release |
 
 ---
 
 ## Installation
 
-### Option A — uv (recommended)
+### Option A — Setup Wizard (recommended)
+
+The setup wizard handles everything automatically — uv installation, `.env`
+configuration, Claude Desktop config merging, dependency install, and desktop
+shortcut creation. Recommended for all users, especially non-developers.
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/Jayfraggs/obsidian-mcp.git
+cd obsidian-mcp
+```
+
+**2. Run the wizard**
+
+```bash
+python setup_wizard.py
+```
+
+Python 3.11 is the only prerequisite. The wizard installs everything else.
+
+The wizard will guide you through:
+
+| Step | What happens |
+|------|-------------|
+| Welcome | Checks Python version and uv |
+| Prerequisites | Lists required and suggested Obsidian plugins |
+| REST API Setup | Step-by-step guide to configure the Local REST API plugin |
+| Configure | Vault path, adapter mode, API key, permission profile, log level, optional web UI |
+| Review | Preview of the `.env` that will be written |
+| Install | Installs uv (if missing), writes `.env`, merges Claude Desktop config, runs `uv sync`, creates desktop shortcut |
+| Done | Copy server command for other MCP clients, or launch the server immediately |
+
+After the wizard completes, use the **desktop shortcut** or `server_launcher.py`
+to start the server at any time — no terminal needed.
+
+---
+
+### Option B — uv (manual)
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/obsidian-mcp.git
+git clone https://github.com/Jayfraggs/obsidian-mcp.git
 cd obsidian-mcp
 
-# 2. Create a virtual environment and install
-uv venv
-uv pip install -e ".[dev]"
+# 2. Install dependencies
+uv sync
 
 # 3. Copy and edit the environment file
 cp .env.example .env
+# Edit .env — set OBSIDIAN_MCP_VAULT_PATH at minimum
 ```
 
-### Option B — pip
+---
+
+### Option C — pip (manual)
 
 ```bash
-git clone https://github.com/your-org/obsidian-mcp.git
+git clone https://github.com/Jayfraggs/obsidian-mcp.git
 cd obsidian-mcp
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -69,7 +114,7 @@ cp .env.example .env
 
 ## Configuration
 
-Edit `.env` in the project root:
+Edit `.env` in the project root (or use the setup wizard to generate it):
 
 ```env
 # ── Required ────────────────────────────────────────────────────────
@@ -107,9 +152,49 @@ OBSIDIAN_MCP_TEMPLATES_FOLDER=Templates
 
 ---
 
+## Running the server
+
+### Server Launcher (GUI)
+
+After running the setup wizard, a desktop shortcut is created. Double-click it
+to open the **Server Launcher** — a GUI with a system tray icon and status panel.
+
+**Tray icon** (bottom-right on Windows/Linux, menu bar on Mac):
+- 🟣 Purple — server running
+- ⚫ Grey — server stopped
+- 🔴 Red — server error
+
+Right-click the tray icon for: Start / Stop / Restart / Open Status Panel / Quit.
+
+**Status panel** (double-click tray icon to open):
+- Live log tail from the server process
+- Start / Stop / Restart buttons
+- "Run Setup Again" button if you need to reconfigure
+
+You can also launch the server launcher directly:
+
+```bash
+python server_launcher.py
+```
+
+### Command line
+
+```bash
+# uv
+uv run obsidian-mcp
+
+# pip / venv
+python -m obsidian_mcp
+```
+
+---
+
 ## Connect to Claude Desktop
 
 Claude Desktop connects over **stdio** (the MCP standard for local servers).
+
+> **Using the setup wizard?** Skip to Step 3 — the wizard writes and merges
+> the config file automatically.
 
 ### Step 1 — Find the config file
 
@@ -313,6 +398,9 @@ Open `http://localhost:8765` in your browser.
 By default the MCP server reads and writes `.md` files directly from disk
 (no Obsidian instance required). If you want live sync with a running Obsidian
 instance, install the **Local REST API** plugin.
+
+> **Using the setup wizard?** The REST API Setup screen walks you through
+> this step-by-step with in-wizard guidance.
 
 ### Install the plugin
 
@@ -636,7 +724,7 @@ Set via `OBSIDIAN_MCP_ADAPTER_MODE` in `.env`.
 ## Permission profiles
 
 | Profile | Allowed operations |
-|---------|--------------------|
+|---------|-------------------|
 | `read_only` | Read, search, list, suggest (zero writes) |
 | `safe_write` | All reads + create, update, append, all plugin writes **(default)** |
 | `admin` | All of above + delete, move, rename |
@@ -646,6 +734,19 @@ Change at runtime via the Web UI **Permissions** view or the topbar dropdown.
 ---
 
 ## Troubleshooting
+
+### Setup wizard won't open
+
+Ensure Python 3.11+ is installed and on your PATH:
+
+```bash
+python --version
+# or
+python3 --version
+```
+
+If the wizard opens but freezes on install, check your internet connection —
+uv and pip both require network access to download packages.
 
 ### Claude Desktop shows no tools
 
@@ -692,15 +793,31 @@ parses right-to-left. Example of correct order:
 - [ ] Task text 🔁 every week ⏳ 2026-06-14 📅 2026-06-20 🔼
 ```
 
+### Server Launcher tray icon not showing
+
+On Linux you may need `libappindicator` for tray support:
+
+```bash
+# Ubuntu / Debian
+sudo apt install libappindicator3-1
+
+# Fedora
+sudo dnf install libappindicator-gtk3
+```
+
+On Windows and Mac the tray icon works out of the box.
+
 ---
 
 ## Developer docs
 
-Internal technical references are in the [`docs/`](docs/) folder.
+Internal technical references are in the [`DOCS/`](DOCS/) folder.
 
 | Doc | What it covers |
 |-----|---------------|
-| [docs/backlink-index.md](docs/backlink-index.md) | `BacklinkIndex` architecture, cold-start persistence, watchdog live updates, thread safety, performance, logging reference |
+| [DOCS/codebase_reference.md](DOCS/codebase_reference.md) | Full function and class registry for every module |
+| [DOCS/backlink-index.md](DOCS/backlink-index.md) | `BacklinkIndex` architecture, cold-start persistence, watchdog live updates, thread safety, performance, logging reference |
+| [DOCS/setup-wizard.md](DOCS/setup-wizard.md) | Setup wizard and server launcher architecture, module reference, extension guide |
 
 ---
 
@@ -708,9 +825,11 @@ Internal technical references are in the [`docs/`](docs/) folder.
 
 ```
 obsidian-mcp/
-├── docs/                        ← developer technical references
+├── DOCS/                        ← developer technical references
 │   ├── README.md                ← docs index
-│   └── backlink-index.md        ← BacklinkIndex architecture & persistence
+│   ├── backlink-index.md        ← BacklinkIndex architecture & persistence
+│   ├── codebase_reference.md    ← full module and function registry
+│   └── setup-wizard.md          ← setup wizard & server launcher dev reference
 ├── src/obsidian_mcp/
 │   ├── __init__.py
 │   ├── __main__.py              ← entry points (MCP + Web UI)
@@ -749,7 +868,13 @@ obsidian-mcp/
 │           ├── index.html
 │           ├── styles.css
 │           └── app.js
-├── tests/
+├── setup_wizard.py              ← GUI setup wizard (run once to configure)
+├── server_launcher.py           ← tray icon + status panel server launcher
+├── _test_/
+│   └── unit/
+│       ├── vault/
+│       │   └── test_str_replace_vault.py
+│       └── test_setup_wizard.py
 ├── .env.example
 ├── .vault-rules                 ← AI behavioural rules (auto-created)
 ├── pyproject.toml

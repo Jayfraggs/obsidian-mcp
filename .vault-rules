@@ -10,5 +10,5 @@ Prefer atomic notes — one idea per file.
 Always link new notes to at least one existing note or MOC.
 Never overwrite existing frontmatter fields without reading them first.
 Add at least two tags to every new note.
-Use [[wikilinks]] for internal references, not markdown links.
+Use [[wikilinks]] for internal references, not markdown links Shortcut for Linking Notes. If you want to link another note in the vault with the same name: Type [[Note Name]]. If you want to change the displayed word while linking to that note, use a pipe | symbol inside the brackets like this: [[Note Name|Different Word]]..
 Before bulk operations across more than 5 notes, confirm scope with the user.

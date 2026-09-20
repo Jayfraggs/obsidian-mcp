@@ -21,15 +21,21 @@ PERF FIXES (2026-06):
 - list_files has a 5-second TTL cache to avoid repeated rglob calls.
 - write/move/delete mutations notify the index directly so it stays
   consistent even if watchdog events arrive with a small delay.
+
+FIND-REPLACE UPDATE:
+- str_replace_vault now accepts exception_rules, dry_run, backup,
+  and whole_word parameters. See method docstring for full details.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from obsidian_mcp.adapters.base import ObsidianAdapter, RawNote
 from obsidian_mcp.adapters.filesystem import FilesystemAdapter
@@ -47,6 +53,132 @@ logger = logging.getLogger("obsidian_mcp.vault.service")
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
 
+# Backup folder name at vault root (hidden from Obsidian file explorer).
+_BACKUP_DIR = ".mcp-backups"
+
+
+class ExceptionRule(TypedDict):
+    """A single exception rule for str_replace_vault.
+
+    type:
+        One of: "folder", "tag", "frontmatter", "path_glob", "contains_string"
+    value:
+        The value to match against for that rule type.
+
+    Examples
+    --------
+    {"type": "folder",          "value": "30-References"}
+    {"type": "tag",             "value": "#archived"}
+    {"type": "frontmatter",     "value": "status: locked"}
+    {"type": "path_glob",       "value": "Templates"}
+    {"type": "contains_string", "value": "DO NOT EDIT"}
+    """
+
+    type: str
+    value: str
+
+
+def _note_matches_exception(
+    vault_rel: str,
+    content: str,
+    rules: list[ExceptionRule],
+) -> tuple[bool, str]:
+    """Return (True, reason) if any exception rule matches; (False, "") otherwise.
+
+    Rules use OR logic: the first matching rule wins and the note is skipped.
+
+    Parameters
+    ----------
+    vault_rel:
+        Vault-relative path of the note (e.g. "Projects/Foo.md").
+    content:
+        Full text content of the note.
+    rules:
+        List of ExceptionRule dicts supplied by the caller.
+    """
+    for rule in rules:
+        rule_type = rule.get("type", "")
+        rule_value = rule.get("value", "")
+
+        if rule_type == "folder":
+            # Match if the note's path starts with the given folder prefix.
+            prefix = rule_value.rstrip("/") + "/"
+            if vault_rel.startswith(prefix) or f"/{rule_value.rstrip('/')}/" in f"/{vault_rel}":
+                return True, f"folder rule matched '{rule_value}'"
+
+        elif rule_type == "tag":
+            # Match Obsidian inline tags: #tagname (space or end-of-line boundary).
+            tag = rule_value if rule_value.startswith("#") else f"#{rule_value}"
+            # Simple check: tag appears in content followed by space, newline, or EOF.
+            pattern = re.escape(tag) + r"(?=[\s,\]]|$)"
+            if re.search(pattern, content, re.MULTILINE):
+                return True, f"tag rule matched '{rule_value}'"
+
+        elif rule_type == "frontmatter":
+            # Match a key: value substring inside the YAML frontmatter block.
+            fm_match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+            if fm_match and rule_value in fm_match.group(1):
+                return True, f"frontmatter rule matched '{rule_value}'"
+
+        elif rule_type == "path_glob":
+            # Match if vault_rel contains the given substring.
+            if rule_value in vault_rel:
+                return True, f"path_glob rule matched '{rule_value}'"
+
+        elif rule_type == "contains_string":
+            # Match if the note body contains the sentinel string.
+            if rule_value in content:
+                return True, f"contains_string rule matched '{rule_value}'"
+
+        else:
+            logger.warning("Unknown exception rule type '%s' — skipping", rule_type)
+
+    return False, ""
+
+
+def _build_search_pattern(old_str: str, *, whole_word: bool, case_sensitive: bool) -> re.Pattern[str]:
+    """Compile a search pattern for the given options.
+
+    For whole_word=True on hyphenated strings (e.g. "DeepSeek-V4-Flash"),
+    \\b anchors are unreliable because hyphens break word boundaries.
+    Instead we assert that the match is not immediately preceded or followed
+    by an alphanumeric character, which is the correct semantic for
+    model-name–style identifiers.
+    """
+    escaped = re.escape(old_str)
+    if whole_word:
+        # Exclude alphanumeric AND hyphen from boundaries so that
+        # "DeepSeek-V4-Flash" does not match inside "DeepSeek-V4-Flash-Lite".
+        pattern = rf"(?<![A-Za-z0-9\-]){escaped}(?![A-Za-z0-9\-])"
+    else:
+        pattern = escaped
+    flags = 0 if case_sensitive else re.IGNORECASE
+    return re.compile(pattern, flags)
+
+
+def _apply_replacement(
+    content: str,
+    pattern: re.Pattern[str],
+    new_str: str,
+    *,
+    require_unique_per_note: bool,
+) -> tuple[str | None, str | None]:
+    """Return (new_content, None) on success or (None, error_reason) on skip.
+
+    Returns None for new_content if the content would be unchanged.
+    """
+    matches = list(pattern.finditer(content))
+    count = len(matches)
+
+    if count == 0:
+        return None, None  # unchanged — not an error
+
+    if count > 1 and require_unique_per_note:
+        return None, f"ambiguous — {count} occurrences found"
+
+    new_content = pattern.sub(new_str, content) if not require_unique_per_note else content[:matches[0].start()] + new_str + content[matches[0].end():]
+    return new_content, None
+
 
 class VaultService:
     """Perform safe operations inside an Obsidian vault."""
@@ -59,6 +191,7 @@ class VaultService:
         adapter: ObsidianAdapter | None = None,
     ) -> None:
         self.resolver = VaultPathResolver(vault_path)
+        self._vault_path = vault_path
         self._adapter: ObsidianAdapter = (
             adapter if adapter is not None else FilesystemAdapter(vault_path)
         )
@@ -196,6 +329,11 @@ class VaultService:
         *,
         require_unique_per_note: bool = True,
         path_glob: str | None = None,
+        whole_word: bool = False,
+        case_sensitive: bool = True,
+        dry_run: bool = True,
+        backup: bool = False,
+        exception_rules: list[ExceptionRule] | None = None,
     ) -> dict[str, Any]:
         """Replace *old_str* with *new_str* across every matching note in the vault.
 
@@ -213,25 +351,66 @@ class VaultService:
             If True (default), a note where old_str occurs more than once
             is skipped and reported under "ambiguous" rather than guessing
             which occurrence to replace. If False, ALL occurrences in a
-            matching note are replaced (str.replace with no count limit) —
-            use this only when you specifically want a global substitution
-            and have verified old_str is unambiguous in context.
+            matching note are replaced.
         path_glob:
             Optional substring filter — only notes whose vault-relative
-            path contains this substring are considered. Pass a folder
-            prefix (e.g. "Projects/") to scope the replacement.
+            path contains this substring are considered.
+        whole_word:
+            If True, only match old_str when it is not immediately preceded
+            or followed by an alphanumeric character. Safe for hyphenated
+            strings like "DeepSeek-V4-Flash" (unlike \\b anchors).
+        case_sensitive:
+            If False, matching is case-insensitive. Default True.
+        dry_run:
+            If True (default), no files are written or backed up. Returns
+            a full preview of what would be changed and skipped.
+            Always run dry_run=True first to verify before committing.
+        backup:
+            If True (and dry_run=False), copies each affected note to
+            .mcp-backups/<timestamp>/<vault-relative-path> before writing.
+            Backups are never created during a dry run.
+        exception_rules:
+            List of rules. If a note matches ANY rule it is skipped.
+            Each rule is a dict with keys "type" and "value".
+
+            Supported types:
+              "folder"          — skip notes inside this folder
+                                  e.g. {"type": "folder", "value": "30-References"}
+              "tag"             — skip notes containing this Obsidian tag
+                                  e.g. {"type": "tag", "value": "#archived"}
+              "frontmatter"     — skip notes whose YAML frontmatter contains
+                                  this key:value substring
+                                  e.g. {"type": "frontmatter", "value": "status: locked"}
+              "path_glob"       — skip notes whose path contains this substring
+                                  e.g. {"type": "path_glob", "value": "Templates"}
+              "contains_string" — skip notes that contain this sentinel string
+                                  e.g. {"type": "contains_string", "value": "DO NOT EDIT"}
 
         Returns
         -------
         dict with keys:
-            updated    — list of vault-relative paths successfully changed
-            ambiguous  — list of paths skipped due to >1 occurrence
-                         (only populated when require_unique_per_note=True)
-            unchanged  — count of notes scanned with zero occurrences
+            dry_run        — bool, whether this was a preview run
+            updated        — list of vault-relative paths changed (or would change)
+            skipped        — list of {path, reason} dicts for exception-skipped notes
+            ambiguous      — list of paths skipped due to >1 occurrence
+                             (only when require_unique_per_note=True)
+            unchanged_count — count of notes scanned with zero occurrences
+            backup_dir     — str path of backup directory (None if backup=False or dry_run)
         """
+        rules: list[ExceptionRule] = exception_rules or []
+        pattern = _build_search_pattern(old_str, whole_word=whole_word, case_sensitive=case_sensitive)
+
         updated: list[str] = []
+        skipped: list[dict[str, str]] = []
         ambiguous: list[str] = []
         unchanged_count = 0
+        backup_dir: str | None = None
+
+        # Determine backup directory once per call (timestamp-stamped).
+        if backup and not dry_run:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup_root = self._vault_path / _BACKUP_DIR / ts
+            backup_dir = str(backup_root)
 
         for file_path in self.list_files():
             if not file_path.endswith(".md"):
@@ -243,29 +422,51 @@ class VaultService:
             if not raw.exists:
                 continue
 
-            occurrences = raw.content.count(old_str)
-            if occurrences == 0:
-                unchanged_count += 1
+            # --- Exception rules check ---
+            matched_exception, reason = _note_matches_exception(file_path, raw.content, rules)
+            if matched_exception:
+                skipped.append({"path": file_path, "reason": reason})
                 continue
 
-            if occurrences > 1 and require_unique_per_note:
+            # --- Replacement logic ---
+            new_content, error_reason = _apply_replacement(
+                raw.content,
+                pattern,
+                new_str,
+                require_unique_per_note=require_unique_per_note,
+            )
+
+            if error_reason:
                 ambiguous.append(file_path)
                 continue
 
-            count = 1 if require_unique_per_note else -1  # -1 = replace all (str.replace semantics)
-            new_content = raw.content.replace(old_str, new_str, count) if count > 0 else raw.content.replace(old_str, new_str)
-            self._adapter.write_note(file_path, new_content)
-            note_path = self.resolver.resolve_note_path(file_path)
-            self._index._update_file(note_path)
+            if new_content is None:
+                # No occurrences found in this note.
+                unchanged_count += 1
+                continue
+
+            # Content would/will change.
+            if not dry_run:
+                # Optionally back up before writing.
+                if backup and backup_dir:
+                    self._backup_note(file_path, raw.content, backup_root)
+
+                self._adapter.write_note(file_path, new_content)
+                note_path = self.resolver.resolve_note_path(file_path)
+                self._index._update_file(note_path)
+
             updated.append(file_path)
 
-        if updated:
+        if updated and not dry_run:
             self._invalidate_file_list()
 
         return {
+            "dry_run": dry_run,
             "updated": updated,
+            "skipped": skipped,
             "ambiguous": ambiguous,
             "unchanged_count": unchanged_count,
+            "backup_dir": backup_dir,
         }
 
     def delete_note(self, path: str) -> dict[str, Any]:
@@ -351,6 +552,13 @@ class VaultService:
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
+
+    def _backup_note(self, vault_rel: str, content: str, backup_root: Path) -> None:
+        """Write *content* to backup_root / vault_rel, creating dirs as needed."""
+        dest = backup_root / vault_rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        logger.debug("Backed up note: %s → %s", vault_rel, dest)
 
     def _find_backlinks_linear(self, target_path: str) -> list[str]:
         """O(N) fallback used only before the index is built."""
