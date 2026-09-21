@@ -46,6 +46,7 @@ _bootstrap_deps()
 
 import customtkinter as ctk  # noqa: E402
 from tkinter import filedialog, messagebox  # noqa: E402
+from PIL import Image, ImageTk  # noqa: E402
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -80,12 +81,16 @@ REQUIRED_PLUGINS = [
 ]
 
 SUGGESTED_PLUGINS = [
-    {"name": "Dataview",    "tools": "dataview_* tools — query notes as a database"},
-    {"name": "Tasks",       "tools": "tasks_* tools — manage tasks across your vault"},
-    {"name": "Excalidraw",  "tools": "excalidraw_* tools — generate diagrams"},
-    {"name": "Kanban",      "tools": "kanban_* tools — manage kanban boards"},
-    {"name": "Templater",   "tools": "templater_* tools — apply templates to notes"},
-    {"name": "Omnisearch",  "tools": "omnisearch_* tools — enhanced vault search"},
+    {"name": "Dataview",              "tools": "dataview_* tools — query notes as a database"},
+    {"name": "Tasks",                 "tools": "tasks_* tools — manage tasks across your vault"},
+    {"name": "Excalidraw",            "tools": "excalidraw_* tools — generate diagrams"},
+    {"name": "Kanban",                "tools": "kanban_* tools — manage kanban boards"},
+    {"name": "Templater",             "tools": "templater_* tools — apply templates to notes"},
+    {"name": "Omnisearch",            "tools": "omnisearch_* tools — enhanced vault search"},
+    {"name": "DataCharts",            "tools": "graph_datachart_* tools — line/bar/scatter/pie charts & equation plots",
+     "url": "https://github.com/jcf-402/datacharts"},
+    {"name": "Mathematica Plot",      "tools": "graph_mathematica_* tools — 2-D/3-D Wolfram Mathematica plots",
+     "url": "https://github.com/marcosnicolau/obsidian-mathematica-plot"},
 ]
 
 # ── OS helpers ─────────────────────────────────────────────────────────────
@@ -112,6 +117,11 @@ def get_claude_desktop_config_path() -> Path | None:
 def get_project_root() -> Path:
     """Directory containing setup_wizard.py == repo root."""
     return Path(__file__).parent.resolve()
+
+
+def get_icon_path() -> Path:
+    """Return the path to the bundled icon.png inside the package."""
+    return get_project_root() / "src" / "obsidian_mcp" / "icon.png"
 
 
 def get_env_path() -> Path:
@@ -272,6 +282,7 @@ class SetupWizard(ctk.CTk):
         self.title(APP_TITLE)
         self.geometry(f"{APP_WIDTH}x{APP_HEIGHT}")
         self.resizable(False, False)
+        self._set_icon()
         self._center_window()
 
         # State
@@ -292,6 +303,28 @@ class SetupWizard(ctk.CTk):
         x = (self.winfo_screenwidth()  - APP_WIDTH)  // 2
         y = (self.winfo_screenheight() - APP_HEIGHT) // 2
         self.geometry(f"+{x}+{y}")
+
+    def _set_icon(self) -> None:
+        """Set the window icon from the bundled assets.
+
+        Windows uses a multi-resolution .ico file via iconbitmap(); other
+        platforms use wm_iconphoto() with the PNG.  Both paths are wrapped
+        in try/except — icon loading is cosmetic and must never crash the wizard.
+        """
+        try:
+            if get_os() == "windows":
+                ico = get_project_root() / "src" / "obsidian_mcp" / "icon.ico"
+                if ico.exists():
+                    self.iconbitmap(default=str(ico))
+            else:
+                png = get_icon_path()
+                if png.exists():
+                    img = Image.open(png)
+                    # Hold a reference — ImageTk.PhotoImage is GC'd without one
+                    self._icon_image = ImageTk.PhotoImage(img)
+                    self.wm_iconphoto(True, self._icon_image)
+        except Exception:
+            pass  # Never crash the wizard over a cosmetic feature
 
     # ── State vars ─────────────────────────────────────────────────────
 
@@ -520,9 +553,15 @@ class SetupWizard(ctk.CTk):
             row.pack(fill="x", padx=24, pady=3)
             ctk.CTkLabel(row, text=f"  {p['name']}",
                          font=ctk.CTkFont(size=12, weight="bold"),
-                         width=120, anchor="w").pack(side="left", padx=8, pady=8)
-            ctk.CTkLabel(row, text=p["tools"], text_color="gray").pack(
-                side="left", padx=8, pady=8)
+                         width=140, anchor="w").pack(side="left", padx=8, pady=8)
+            text_col = ctk.CTkFrame(row, fg_color="transparent")
+            text_col.pack(side="left", padx=8, pady=4, fill="x", expand=True)
+            ctk.CTkLabel(text_col, text=p["tools"], text_color="gray",
+                         anchor="w", justify="left").pack(anchor="w")
+            if p.get("url"):
+                ctk.CTkLabel(text_col, text=p["url"], text_color="#818CF8",
+                             cursor="hand2", anchor="w",
+                             font=ctk.CTkFont(size=11)).pack(anchor="w")
 
         # Acknowledgement
         ctk.CTkFrame(f, height=1, fg_color="#444").pack(fill="x", padx=24, pady=16)

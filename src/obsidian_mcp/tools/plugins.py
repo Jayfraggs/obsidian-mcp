@@ -14,6 +14,7 @@ from obsidian_mcp.config import ObsidianMCPSettings
 from obsidian_mcp.plugins import (
     DataviewService,
     ExcalidrawService,
+    GraphService,
     KanbanService,
     OmnisearchService,
     TasksService,
@@ -64,6 +65,15 @@ PLUGIN_TOOL_NAMES = (
     "omnisearch_find_poorly_indexed",
     "omnisearch_optimise_note",
     "omnisearch_bulk_optimise",
+    # Graphs (DataCharts + Mathematica Plot)
+    "graph_datachart_equation",
+    "graph_datachart_manual",
+    "graph_datachart_from_table",
+    "graph_datachart_block",
+    "graph_mathematica_2d",
+    "graph_mathematica_3d",
+    "graph_mathematica_custom",
+    "graph_mathematica_block",
 )
 
 
@@ -86,6 +96,7 @@ def register_plugin_tools(
     ex  = ExcalidrawService(vault)
     om  = OmnisearchService(vault)
     kb  = KanbanService(vault)
+    gr  = GraphService(vault)
 
     # ── Dataview ──────────────────────────────────────────────────────
 
@@ -716,3 +727,248 @@ def register_plugin_tools(
             limit: Number of notes to report on.
         """
         return om.bulk_optimise(folder=folder, limit=limit)
+
+    # ── Graphs (DataCharts + Mathematica Plot) ────────────────────────
+
+    @server.tool("graph_datachart_equation")
+    def graph_datachart_equation(
+        path: str,
+        heading: str,
+        equations: list[dict[str, str]],
+        chart_type: str = "line",
+        x_range: list[float] = [-10, 10],
+        steps: int = 200,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a DataCharts equation-based chart to a vault note.
+
+        Generates a ``datachart`` fenced code block powered by Chart.js and
+        Mathjs (DataCharts plugin: https://github.com/jcf-402/datacharts).
+        Supports line, bar, and scatter chart types for mathematical functions.
+
+        Args:
+            path: Vault-relative note path to write to (created if absent).
+            heading: H2 heading inserted before the chart block.
+            equations: List of equation dicts. Each must have:
+                - ``expr`` (str): Mathjs expression, e.g. ``"sin(x)"``.
+                Optional: ``label`` (legend label), ``color`` (CSS colour).
+            chart_type: ``"line"``, ``"bar"``, or ``"scatter"``.
+            x_range: [start, end] for the x-axis sample range.
+            steps: Number of sample points (default 200).
+            title: Optional chart title displayed above the plot.
+
+        Returns:
+            ``{path, block, status}`` — the block string can be embedded elsewhere.
+        """
+        return gr.datachart_equation(
+            path, heading, equations,
+            chart_type=chart_type,
+            x_range=(x_range[0], x_range[1]),
+            steps=steps,
+            title=title,
+        )
+
+    @server.tool("graph_datachart_manual")
+    def graph_datachart_manual(
+        path: str,
+        heading: str,
+        datasets: list[dict[str, Any]],
+        chart_type: str = "line",
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a DataCharts chart with manually specified data points to a vault note.
+
+        Generates a ``datachart`` fenced code block (DataCharts plugin).
+        Use this when you have explicit x/y data rather than a formula.
+        Supports line, bar, scatter, pie, doughnut, and radar chart types.
+
+        Args:
+            path: Vault-relative note path.
+            heading: H2 heading inserted before the chart block.
+            datasets: List of dataset dicts. Each must have:
+                - ``label`` (str): Legend label.
+                - ``x`` (list): X values (numbers or strings for categorical).
+                - ``y`` (list[float]): Y values.
+                Optional: ``color`` (CSS colour string).
+            chart_type: ``"line"``, ``"bar"``, ``"scatter"``, ``"pie"``,
+                ``"doughnut"``, or ``"radar"``.
+            title: Optional chart title.
+
+        Returns:
+            ``{path, block, status}``.
+        """
+        return gr.datachart_manual(path, heading, datasets, chart_type=chart_type, title=title)
+
+    @server.tool("graph_datachart_from_table")
+    def graph_datachart_from_table(
+        path: str,
+        heading: str,
+        source_note: str,
+        x_column: str,
+        y_column: str,
+        table_index: int = 0,
+        chart_type: str = "line",
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a DataCharts chart sourced from a Markdown table in another note.
+
+        Generates a ``datachart`` block that reads its data from a table
+        already present in the vault (DataCharts plugin).
+
+        Args:
+            path: Vault-relative destination note path.
+            heading: H2 heading inserted before the chart block.
+            source_note: Vault-relative path to the note containing the table.
+            x_column: Header name of the column to use as x values.
+            y_column: Header name of the column to use as y values.
+            table_index: Zero-based index of the target table in the source note.
+            chart_type: DataCharts chart type.
+            title: Optional chart title.
+
+        Returns:
+            ``{path, block, status}``.
+        """
+        return gr.datachart_from_table(
+            path, heading, source_note, x_column, y_column,
+            table_index=table_index, chart_type=chart_type, title=title,
+        )
+
+    @server.tool("graph_datachart_block")
+    def graph_datachart_block(
+        chart_type: str,
+        equations: list[dict[str, str]] | None = None,
+        datasets: list[dict[str, Any]] | None = None,
+        x_range: list[float] = [-10, 10],
+        steps: int = 200,
+        title: str | None = None,
+    ) -> str:
+        """Return a raw DataCharts code block string without writing to the vault.
+
+        Use this when you want to embed the block inside a larger note you
+        are composing, rather than writing it standalone.
+
+        Args:
+            chart_type: DataCharts chart type.
+            equations: Equation dicts (``expr``, optional ``label``, ``color``).
+            datasets: Manual dataset dicts (``label``, ``x``, ``y``, optional ``color``).
+            x_range: [start, end] sample range for equation charts.
+            steps: Sample points.
+            title: Optional chart title.
+
+        Returns:
+            Fenced ``datachart`` block string ready to paste into markdown.
+        """
+        return gr.datachart_block(
+            chart_type,
+            equations=equations,
+            datasets=datasets,
+            x_range=(x_range[0], x_range[1]),
+            steps=steps,
+            title=title,
+        )
+
+    @server.tool("graph_mathematica_2d")
+    def graph_mathematica_2d(
+        path: str,
+        heading: str,
+        expression: str,
+        variable: str = "x",
+        x_range: list[str] = ["-Pi", "Pi"],
+        plot_options: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a 2-D Wolfram Mathematica Plot block to a vault note.
+
+        Generates a ``mathematica-plot`` fenced block rendered by the
+        Mathematica Plot plugin (https://github.com/marcosnicolau/obsidian-mathematica-plot).
+        Requires wolframscript installed on the user's machine.
+
+        Args:
+            path: Vault-relative note path.
+            heading: H2 heading inserted before the block.
+            expression: Wolfram expression to plot (e.g. ``"Sin[x]"``).
+            variable: Free variable name (default ``"x"``).
+            x_range: [start, end] — Wolfram constants like ``"Pi"`` are valid.
+            plot_options: Optional extra Wolfram options, e.g.
+                ``"PlotStyle -> Red, PlotLabel -> \\\"My plot\\\"\"``.
+
+        Returns:
+            ``{path, block, status}``.
+        """
+        return gr.mathematica_plot_2d(
+            path, heading, expression,
+            variable=variable,
+            x_range=(x_range[0], x_range[1]),
+            plot_options=plot_options,
+        )
+
+    @server.tool("graph_mathematica_3d")
+    def graph_mathematica_3d(
+        path: str,
+        heading: str,
+        expression: str,
+        variable_x: str = "x",
+        variable_y: str = "y",
+        x_range: list[str] = ["-Pi", "Pi"],
+        y_range: list[str] = ["-Pi", "Pi"],
+        plot_options: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a 3-D Wolfram Mathematica Plot3D block to a vault note.
+
+        Generates a ``mathematica-plot`` fenced block using ``Plot3D[...]``
+        (Mathematica Plot plugin).
+
+        Args:
+            path: Vault-relative note path.
+            heading: H2 heading inserted before the block.
+            expression: Wolfram expression, e.g. ``"Sin[x]*Cos[y]"``.
+            variable_x: First free variable (default ``"x"``).
+            variable_y: Second free variable (default ``"y"``).
+            x_range: [start, end] for variable_x.
+            y_range: [start, end] for variable_y.
+            plot_options: Optional extra Wolfram options.
+
+        Returns:
+            ``{path, block, status}``.
+        """
+        return gr.mathematica_plot_3d(
+            path, heading, expression,
+            variable_x=variable_x,
+            variable_y=variable_y,
+            x_range=(x_range[0], x_range[1]),
+            y_range=(y_range[0], y_range[1]),
+            plot_options=plot_options,
+        )
+
+    @server.tool("graph_mathematica_custom")
+    def graph_mathematica_custom(
+        path: str,
+        heading: str,
+        wolfram_code: str,
+    ) -> dict[str, Any]:
+        """Write an arbitrary Wolfram Mathematica block to a vault note.
+
+        Use for any Mathematica visualisation command that doesn't fit
+        Plot or Plot3D: ``ParametricPlot``, ``ListLinePlot``,
+        ``DensityPlot``, ``ContourPlot``, etc.
+
+        Args:
+            path: Vault-relative note path.
+            heading: H2 heading inserted before the block.
+            wolfram_code: Complete Wolfram Mathematica expression string.
+
+        Returns:
+            ``{path, block, status}``.
+        """
+        return gr.mathematica_custom(path, heading, wolfram_code)
+
+    @server.tool("graph_mathematica_block")
+    def graph_mathematica_block(wolfram_code: str) -> str:
+        """Return a raw Mathematica Plot code block string without writing to the vault.
+
+        Args:
+            wolfram_code: Complete Wolfram Mathematica expression string.
+
+        Returns:
+            Fenced ``mathematica-plot`` block string ready to paste into markdown.
+        """
+        return gr.mathematica_block(wolfram_code)

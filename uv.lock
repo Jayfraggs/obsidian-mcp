@@ -860,7 +860,7 @@ wheels = [
 
 [[package]]
 name = "obsidian-mcp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -907,6 +907,9 @@ requires-dist = [
     { name = "watchdog", specifier = ">=4.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = []
 
 [[package]]
 name = "openapi-pydantic"

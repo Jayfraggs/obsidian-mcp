@@ -59,8 +59,17 @@ cd obsidian-mcp
 
 **2. Run the wizard**
 
+The wizard is started with:
+
 ```bash
 python setup_wizard.py
+```
+Run from the repo root. That's the only prerequisite — Python 3.11+. Everything else (uv, customtkinter, dependencies) gets handled by the wizard itself.
+
+If the user is on a system where python points to Python 2 (older Linux/Mac setups), they should use:
+
+```bash
+python3 setup_wizard.py
 ```
 
 Python 3.11 is the only prerequisite. The wizard installs everything else.
