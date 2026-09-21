@@ -24,3 +24,11 @@ cd 'C:\Users\****\Code\obsidian-mcp'; & '.venv\Scripts\obsidian-mcp.exe'
 cd 'C:\Users\****\Code\obsidian-mcp'; & '.venv\Scripts\obsidian-mcp-web.exe'
 
 Note: "****" is your device's username
+cd "C:\Users\Olabode Nathaniel\Code\obsidian-mcp-Copy"
+
+$env:TWINE_USERNAME = "Jayfraggs"
+$env:TWINE_PASSWORD = "cMvpC2$p6QiT6g4"
+
+python -m build
+python -m twine check dist/*
+python -m twine upload dist/*
