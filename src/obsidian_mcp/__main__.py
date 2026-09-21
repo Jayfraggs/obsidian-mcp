@@ -38,8 +38,19 @@ def _build_vault_service():
 
 
 def main() -> None:
-    """Run the MCP stdio server (used by Claude Desktop and all MCP clients)."""
+    """Run the MCP stdio server (used by Claude Desktop and all MCP clients).
+
+    This function is preserved for backwards compatibility but the actual
+    server startup is performed by `run_mcp()` which does guarded imports
+    and prints clearer, actionable errors for common environments issues.
+    """
+    run_mcp()
+
+
+def run_mcp() -> None:
+    """Start the MCP stdio server. Errors are reported cleanly to stderr."""
     try:
+        # Import here so `--help` or other lightweight CLI checks don't trigger heavy imports
         from obsidian_mcp.server import create_server
         from obsidian_mcp.tools.core import register_core_tools
         from obsidian_mcp.tools.knowledge import register_knowledge_tools
@@ -49,9 +60,9 @@ def main() -> None:
         settings, vault_service, logger = _build_vault_service()
 
         rules = _load_rules()
-        rule_count = len(
-            [line for line in rules.splitlines() if line.strip() and not line.startswith("#")]
-        )
+        rule_count = len([
+            line for line in rules.splitlines() if line.strip() and not line.startswith("#")
+        ])
         logger.info("Loaded %d vault rules.", rule_count)
         system_prompt = _build_system_prompt(rules)
 
@@ -79,8 +90,19 @@ def main() -> None:
         _print_err("[obsidian-mcp] Stopped.")
         sys.exit(0)
 
+    except ModuleNotFoundError as exc:
+        # Friendly message for known common cause (mcp v2 incompat)
+        msg = str(exc).lower()
+        if "mcp.server.fastmcp" in msg or "fastmcp" in msg:
+            _print_err("[obsidian-mcp] Dependency error: incompatible 'mcp' version detected.")
+            _print_err("  -> This release of obsidian-mcp expects 'mcp' v1 API (fastmcp).")
+            _print_err("  -> Temporary fix: pin mcp to <2 in your environment: pip install 'mcp<2' and retry.")
+        else:
+            _print_err(f"[obsidian-mcp] Module not found: {exc}")
+        sys.exit(1)
+
     except Exception as exc:
-        # Print a clean error to stderr so Claude Desktop shows it in logs
+        # Print a clean error to stderr so external callers see a short, actionable message
         _print_err("\n[obsidian-mcp] STARTUP ERROR — server could not start.\n")
         _print_err(f"  {type(exc).__name__}: {exc}\n")
 
@@ -101,7 +123,7 @@ def main() -> None:
                 "  -> REST API key issue - set OBSIDIAN_MCP_ADAPTER_MODE=filesystem to bypass"
             )
         elif "module" in msg or "import" in msg:
-            _print_err("  -> Missing dependency - run: uv pip install -e .")
+            _print_err("  -> Missing dependency - try: pip install -e . or pin 'mcp<2' if needed")
 
         _print_err("\nFull traceback:")
         traceback.print_exc(file=sys.stderr)
@@ -109,13 +131,21 @@ def main() -> None:
 
 
 def web_main() -> None:
-    """Run the local Web UI HTTP server."""
+    """Run the local Web UI HTTP server. Validates config and displays helpful messages on error."""
     try:
         import uvicorn
 
         from obsidian_mcp.web.app import create_web_app
 
-        settings, vault_service, logger = _build_vault_service()
+        try:
+            settings, vault_service, logger = _build_vault_service()
+        except Exception as exc:
+            # Likely missing required settings (e.g. vault path). Print friendly help.
+            _print_err(f"[obsidian-mcp-web] Configuration error: {exc}")
+            _print_err("  -> Ensure OBSIDIAN_MCP_VAULT_PATH is set (environment or .env) and valid.")
+            _print_err("  -> Run: python -m obsidian_mcp check to validate configuration.")
+            sys.exit(1)
+
         logger.info("Building backlink index and starting watcher …")
         vault_service.start()
         logger.info("Web UI starting at http://%s:%s", settings.web_host, settings.web_port)
@@ -172,18 +202,30 @@ def check_config() -> None:
         sys.exit(1)
 
 
-# ── Dispatcher ────────────────────────────────────────────────────────
-# Supports both entry-point scripts and `python -m obsidian_mcp [mode]`
+# ── CLI Dispatcher ───────────────────────────────────────────────────
+def _cli() -> None:
+    """Lightweight CLI that avoids heavy imports for --help and simple checks."""
+    import argparse
 
-if __name__ == "__main__":
-    cmd = sys.argv[1].lower() if len(sys.argv) > 1 else "mcp"
+    parser = argparse.ArgumentParser(prog="obsidian-mcp", description="Obsidian MCP server runner")
+    sub = parser.add_subparsers(dest="command", help="sub-command to run")
+    sub.add_parser("mcp", help="Run the MCP stdio server")
+    sub.add_parser("web", help="Run the local Web UI")
+    sub.add_parser("check", help="Validate configuration and exit")
+
+    args = parser.parse_args()
+    cmd = args.command or "mcp"
+
     if cmd == "web":
         web_main()
     elif cmd in ("check", "validate", "config"):
         check_config()
     elif cmd == "mcp":
-        main()
+        run_mcp()
     else:
-        _print_err(f"Unknown command: {cmd}")
-        _print_err("Usage: python -m obsidian_mcp [mcp|web|check]")
+        parser.print_help()
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    _cli()

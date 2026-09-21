@@ -21,7 +21,7 @@ from obsidian_mcp.plugins import (
 )
 from obsidian_mcp.vault.service import VaultService
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).parent.parent / "static"
 
 # ── Request models ────────────────────────────────────────────────────
 

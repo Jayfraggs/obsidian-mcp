@@ -1,0 +1,3 @@
+recursive-include src/obsidian_mcp/static *
+recursive-include src/obsidian_mcp/plugins/ea_scripts *.md
+include src/obsidian_mcp/icon.png

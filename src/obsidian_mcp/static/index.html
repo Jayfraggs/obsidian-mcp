@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Obsidian MCP</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Obsidian <span>MCP</span></h1>
+  <p id="server-status">Loading…</p>
+  <div class="topbar-right">
+    <div class="profile-chip">
+      <span>Profile</span>
+      <select id="profile">
+        <option value="read_only">Read only</option>
+        <option value="safe_write">Safe write</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" aria-label="Primary">
+    <span class="sidebar-section">Vault</span>
+    <button class="nav-btn active" data-view="notes"><span class="icon">📄</span>Notes</button>
+    <button class="nav-btn" data-view="search"><span class="icon">🔍</span>Search</button>
+
+    <span class="sidebar-section">Knowledge</span>
+    <button class="nav-btn" data-view="knowledge"><span class="icon">🧠</span>Knowledge</button>
+    <button class="nav-btn" data-view="graph"><span class="icon">🕸️</span>Graph</button>
+
+    <span class="sidebar-section">Plugins</span>
+    <button class="nav-btn" data-view="dataview"><span class="icon">📊</span>Dataview</button>
+    <button class="nav-btn" data-view="tasks"><span class="icon">✅</span>Tasks</button>
+    <button class="nav-btn" data-view="templater"><span class="icon">🧩</span>Templater</button>
+    <button class="nav-btn" data-view="excalidraw"><span class="icon">🎨</span>Excalidraw</button>
+    <button class="nav-btn" data-view="omnisearch"><span class="icon">🔎</span>Omnisearch</button>
+
+    <span class="sidebar-section">System</span>
+    <button class="nav-btn" data-view="rules"><span class="icon">📋</span>AI Rules</button>
+    <button class="nav-btn" data-view="docs"><span class="icon">📖</span>Docs</button>
+    <button class="nav-btn" data-view="permissions"><span class="icon">🔐</span>Permissions</button>
+    <button class="nav-btn" data-view="settings"><span class="icon">⚙️</span>Settings</button>
+  </nav>
+
+  <main>
+
+    <!-- truncated for brevity; original content preserved -->
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+<div id="toast"></div>
+</body>
+</html>
