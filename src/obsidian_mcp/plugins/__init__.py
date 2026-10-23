@@ -12,6 +12,7 @@ Usage::
         ExcalidrawService,
         OmnisearchService,
         KanbanService,
+        GraphService,
     )
     dv  = DataviewService(vault_service)
     ts  = TasksService(vault_service)
@@ -19,10 +20,12 @@ Usage::
     ex  = ExcalidrawService(vault_service)
     om  = OmnisearchService(vault_service)
     kb  = KanbanService(vault_service)
+    gr  = GraphService(vault_service)
 """
 
 from .dataview import DataviewService
 from .excalidraw import ExcalidrawService
+from .graphs import GraphService
 from .kanban import KanbanService
 from .omnisearch import OmnisearchService
 from .tasks import TasksService
@@ -31,6 +34,7 @@ from .templater import TemplaterService
 __all__ = [
     "DataviewService",
     "ExcalidrawService",
+    "GraphService",
     "KanbanService",
     "OmnisearchService",
     "TasksService",

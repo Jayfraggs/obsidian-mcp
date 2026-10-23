@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "obsidian-mcp"
 version = "0.3.1"
 description = "MCP server for Obsidian vaults — Dataview, Tasks, Templater, Excalidraw, Omnisearch"
-readme = "README.md"
+readme = "src/obsidian_mcp/README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["obsidian", "mcp", "knowledge-management", "claude", "llm"]
