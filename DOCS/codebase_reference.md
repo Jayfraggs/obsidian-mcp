@@ -1,6 +1,6 @@
 # Codebase Reference
 
-Last updated: 2026-06-12
+Last updated: 2026-07-20
 
 ## Purpose
 
@@ -19,6 +19,7 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 - `obsidian_mcp.__main__`: command-line entry point for running the server.
 - `obsidian_mcp.vault.paths`: vault-relative path safety.
 - `obsidian_mcp.vault.metadata`: Obsidian markdown metadata extraction.
+- `obsidian_mcp.vault.index`: cached backlink index and watchdog update helpers.
 - `obsidian_mcp.vault.service`: core vault note, file, search, and backlink operations.
 - `obsidian_mcp.tools.core`: MCP registration for core tools.
 - `obsidian_mcp.knowledge.analysis`: deterministic local analysis helpers.
@@ -64,6 +65,18 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 - `main() -> None`: runs the configured server.
 - `build_web_app()`: loads settings, configures logging, and creates the FastAPI Web UI app.
 - `web_main() -> None`: runs the configured local Web UI server.
+- `check_config() -> None`: validates local configuration and prints ASCII-safe status output.
+
+### `obsidian_mcp.vault.index`
+
+- `BacklinkIndex`: in-process inverted backlink index with cache-backed startup and watchdog updates.
+- `BacklinkIndex.build() -> None`: loads cache or scans markdown files, then persists the index.
+- `BacklinkIndex.start() -> None`: starts the watchdog observer for incremental markdown updates.
+- `BacklinkIndex.stop() -> None`: stops the observer and flushes pending cache writes.
+- `BacklinkIndex.find(target_path: str) -> list[str]`: returns sorted backlink source paths for a target note stem.
+- `BacklinkIndex.is_ready() -> bool`: reports whether the index has completed its initial build.
+- `_cache_path_for_vault(vault_path: Path) -> Path`: returns the temp-dir cache path for a vault.
+- `_extract_link_stems(content: str) -> set[str]`: extracts lowercased wikilink target stems.
 
 ### `obsidian_mcp.vault.paths`
 

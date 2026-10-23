@@ -42,6 +42,7 @@ obsidian-mcp-web = "obsidian_mcp._web_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/obsidian_mcp"]
+artifacts = ["src/obsidian_mcp/plugins/ea_scripts/*.md", "src/obsidian_mcp/icon.png"]
 
 # ── uv settings ────────────────────────────────────────────────────────
 # Prevents uv from rebuilding the package on every `uv run` invocation.

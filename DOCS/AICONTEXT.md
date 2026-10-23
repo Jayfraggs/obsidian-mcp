@@ -1,6 +1,6 @@
 # AI Context
 
-Last updated: 2026-06-12
+Last updated: 2026-07-20
 
 ## Project State
 
@@ -10,7 +10,8 @@ This workspace is a greenfield Obsidian MCP server project. The root currently c
 - `02_core_mcp_server_and_tools.md`: core Obsidian note and file tools to implement after the foundation.
 - `03_maxed_out_features_and_scaling.md`: advanced knowledge, organization, AI, cache, auth, and UI features for later phases.
 
-There is no Git repository currently initialized in this folder.
+The workspace is now a Git repository with the Python package under `src/obsidian_mcp`
+and tests under `_test_`.
 
 ## Current Build Strategy
 
@@ -65,6 +66,14 @@ Prompt 3 local permissions and Web UI are implemented with:
 - FastAPI Web API and static Web UI served by `obsidian-mcp-web`.
 
 Deferred Prompt 3 platform features remain SQLite metadata cache, multi-user authentication, remote deployment permissions, and remote embedding-backed search.
+
+## Current Maintenance Notes
+
+- Backlink indexing is implemented by `obsidian_mcp.vault.index.BacklinkIndex` with a persisted temp-dir cache and watchdog updates.
+- On 2026-07-20, startup was fixed after `_persist_now` was accidentally dedented out of `BacklinkIndex`, which also trapped helper methods such as `_rel` outside the class method surface.
+- `python -m obsidian_mcp check` now uses ASCII status labels so it works in Windows CP1252 consoles.
+- Focused regression tests for these fixes live in `_test_/unit/vault/test_index.py` and `_test_/unit/test_main.py`.
+- Full-suite pytest collection is currently blocked by duplicate `test_service.py` basenames unless `--import-mode=importlib` is used. With importlib mode, several pre-existing expectation/config tests still fail outside this bugfix.
 
 ## Documentation Rules In Use
 

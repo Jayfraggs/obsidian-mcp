@@ -224,3 +224,26 @@
 - Created `.gitignore` for Python, environment, test, and build artifacts.
 - Created the initial `src/obsidian_mcp` package and minimal configuration module.
 - Added `README.md` after the package build reported the referenced readme was missing.
+
+## 2026-07-20 - Backlink Startup and CLI Check Fix
+
+### Investigation
+
+- Reproduced the startup regression with a focused backlink index test.
+- Identified that `BacklinkIndex._persist_now` had been dedented out of the class, leaving helper methods such as `_rel` unreachable as instance methods.
+- Ran `python -m obsidian_mcp check` and found a separate Windows console encoding failure caused by Unicode check/cross status glyphs.
+
+### Code Changes
+
+- Restored `_persist_now` as a `BacklinkIndex` instance method so `_schedule_persist`, `_read_stems`, and `_rel` remain available on the class.
+- Updated `check_config()` status output to ASCII `[OK]` and `[ERROR]` labels for CP1252 console compatibility.
+- Cleaned ruff issues in touched files, including an unused import, long lines, import spacing, and ambiguous variable naming.
+
+### Tests and Verification
+
+- Added `_test_/unit/vault/test_index.py` to prove `BacklinkIndex.build()` indexes wikilink backlinks.
+- Added `_test_/unit/test_main.py` to prove `check_config()` prints successfully to a CP1252 stdout stream.
+- Verified focused tests pass with `.venv\Scripts\python.exe -m pytest _test_\unit\vault\test_index.py _test_\unit\test_main.py -q -p no:cacheprovider`.
+- Verified `.venv\Scripts\python.exe -m obsidian_mcp check` passes against the configured vault and REST adapter.
+- Verified touched files pass ruff.
+- Full `_test_` collection still has pre-existing duplicate basename issues, and importlib-mode full suite has unrelated pre-existing failures.

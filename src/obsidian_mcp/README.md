@@ -398,30 +398,6 @@ clients surface as the server-level system prompt.
 
 ## Plugin reference
 
-### delete_folder tool
-
-The MCP exposes a destructive `delete_folder` tool to remove folders
-inside the configured vault. This operation requires explicit
-confirmation to avoid accidental data loss.
-
-- **Tool name:** `delete_folder`
-- **Parameters:**
-  - `path: str` — Vault-relative folder path (e.g. `Projects/Old`)
-  - `recursive: bool` (default `False`) — Remove non-empty folders when `True`.
-  - `confirm: bool` (default `False`) — Must be set to `True` to actually perform deletion.
-- **Return:** `{"path": "<vault_rel>", "deleted": True}` on success.
-
-Usage example (MCP tool call):
-
-```
-delete_folder("Projects/Old", recursive=True, confirm=True)
-```
-
-Security notes:
-
-- The server refuses to delete the vault root. Permission profiles may
-  further restrict delete operations (see Permission profiles).
-
 ### Dataview
 
 Dataview turns your notes into a queryable database. The MCP generates

@@ -298,7 +298,8 @@ Open `http://localhost:8765` in your browser.
 | **Dataview** | Build dashboards, inspect fields, generate queries |
 | **Tasks** | Browse, create, complete Tasks-plugin tasks |
 | **Templater** | List, preview, apply, and create templates |
-| **Excalidraw** | Generate architecture and concept-map diagrams |
+| **Excalidraw** | Generate architecture and concept-map diagrams; install Script Engine tools |
+| **Kanban** | Create and manage Kanban-plugin boards, lanes, and cards |
 | **Omnisearch** | Audit and optimise note discoverability |
 | **AI Rules** | Set behavioural rules the AI must follow |
 | **Docs** | Plugin syntax reference and MCP tool index |
@@ -459,10 +460,70 @@ The MCP resolves static calls at generation time and preserves dynamic blocks.
 
 ### Excalidraw
 
-The MCP generates `.excalidraw.md` files that Obsidian's Excalidraw plugin
-can open as interactive diagrams.
+#### Prerequisites
 
-**Node types for architecture diagrams:**
+1. Install the [Excalidraw plugin](https://github.com/zsviczian/obsidian-excalidraw-plugin)
+   from Obsidian's Community Plugins browser and enable it.
+
+2. Set the **Script Engine folder** so installed scripts are discovered:
+   - Open **Settings → Excalidraw → Script Engine**
+   - Set the folder to `Excalidraw/Scripts` (must match the `scripts_folder`
+     argument used when calling `excalidraw_install_scripts`; default matches)
+
+3. Ask the AI to install the bundled scripts once:
+   > *"Install the Excalidraw scripts into my vault"*
+
+   This calls `excalidraw_install_scripts` and writes 18 Script Engine files
+   to `Excalidraw/Scripts/`. They appear immediately in Obsidian's command
+   palette as **Excalidraw Script: \<name\>** and can be assigned hotkeys.
+
+#### What the AI does vs. what scripts do
+
+The MCP and the Script Engine serve different roles and are **not** interchangeable:
+
+| Responsibility | How |
+|----------------|-----|
+| Generate a new diagram from scratch | AI calls `excalidraw_generate_architecture` or `excalidraw_generate_concept_map` — produces a correct `.excalidraw.md` file with bound arrows |
+| Embed a diagram inline in a note | AI calls `excalidraw_embed_in_note` — inserts `![[drawing.excalidraw.md]]` into any markdown note |
+| Install scripts for the user | AI calls `excalidraw_install_scripts` |
+| Run **Auto Layout** on a diagram | User selects elements, runs **Excalidraw Script: Auto Layout** from the command palette |
+| Add a process step interactively | User runs **Excalidraw Script: Add Next Step in Process** |
+| Write a custom automation | AI calls `excalidraw_write_script` with authored JavaScript |
+
+The AI cannot *execute* scripts — they run inside Obsidian's JavaScript
+runtime, which the MCP has no access to. The scripts are a user productivity
+layer for interactive editing after the AI generates the initial diagram.
+
+#### Bundled scripts (installed via `excalidraw_install_scripts`)
+
+**Layout & structure**
+- **Auto Layout** — ELK-powered automatic layout (layered / radial / tree). Requires internet on first run.
+- **Mindmap Builder** — Full interactive mindmap environment with sidepanel UI, keyboard shortcuts, auto-layout, and colour coding.
+- **Mindmap format** — Auto-format a left-to-right mindmap; re-spaces nodes and aligns branches.
+- **Mindmap connector** — Connect selected nodes with mindmap-style right-angle lines.
+- **Elbow connectors** — Convert selected arrows to right-angle elbow connectors.
+
+**Drawing workflow**
+- **Connect elements** — Connect two selected objects with a properly bound arrow matching source style.
+- **Box Selected Elements** — Wrap the selection in a bounding rectangle (prompts for padding).
+- **Box Each Selected Groups** — Add an individual box around each selected group.
+- **Add Next Step in Process** — Prompt for a label, create a sticky-note step, auto-connect with an arrow.
+- **Set Dimensions** — Set exact x / y / width / height on the largest selected element.
+- **Concatenate lines** — Merge two arrows or lines into one.
+
+**Conversion & editing**
+- **Convert freedraw to line** — Convert freehand drawings to editable polylines.
+- **Convert selected text elements to sticky notes** — Make text elements wrappable.
+- **Add Connector Point** — Add a bullet-point circle to each selected text element.
+- **Copy Selected Element Styles to Global** — Copy stroke/fill/font to the global toolbar.
+
+**Vault linking**
+- **Add Link to Existing File and Open** — Attach a wikilink to a selected element pointing to a vault file.
+- **Add Link to New Page and Open** — Create a new note or drawing and attach a link to a selected element.
+- **Deconstruct selected elements into new drawing** — Move selected elements to a new file and replace them with an embedded reference.
+
+#### Node types for architecture diagrams
+
 | Type | Shape | Colour |
 |------|-------|--------|
 | `service` | Rectangle | Blue |
@@ -470,12 +531,77 @@ can open as interactive diagrams.
 | `queue` | Rectangle | Yellow |
 | `external` | Rectangle | Green |
 | `user` | Ellipse | Orange |
+| `container` | Rectangle | Grey |
 
 **Layouts:** `layered` (left-to-right) · `grid` · `radial`
 
-**MCP tools:** `excalidraw_generate_architecture`,
-`excalidraw_generate_concept_map`, `excalidraw_parse_elements`,
-`excalidraw_add_annotation`
+#### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `excalidraw_generate_architecture` | Generate a diagram from explicit node/edge spec |
+| `excalidraw_generate_concept_map` | Generate a radial concept map |
+| `excalidraw_parse_elements` | Read element list from an existing drawing |
+| `excalidraw_add_annotation` | Add a floating text element to a drawing |
+| `excalidraw_embed_in_note` | Insert `![[drawing]]` transclusion into a markdown note |
+| `excalidraw_install_scripts` | Install bundled Script Engine files into the vault |
+| `excalidraw_list_bundled_scripts` | List all bundled scripts with descriptions |
+| `excalidraw_write_script` | Author and save a custom JavaScript Script Engine file |
+
+### Kanban
+
+#### Prerequisites
+
+Install the [Kanban plugin](https://github.com/mgmeyers/obsidian-kanban)
+from Obsidian's Community Plugins browser and enable it. No further
+configuration is required — boards work as soon as the file is created.
+
+#### File format
+
+A Kanban board is a single `.md` file with `kanban-plugin: basic` in its
+frontmatter. Each `##` heading is a lane (left-to-right column order);
+each checkbox line under a lane is a card:
+
+```markdown
+---
+kanban-plugin: basic
+title: Homelab Sprint
+---
+
+## Backlog
+
+- [ ] Migrate Plex to new NAS 🔼
+
+## In Progress
+
+- [ ] Set up Proxmox cluster 📅 2026-07-01 ⏫
+
+## Done
+
+**Complete**
+- [x] Configure Pi-hole ✅ 2026-06-18
+```
+
+Cards use the same emoji syntax as the **Tasks** plugin (📅 due, ⏳
+scheduled, 🔼/⏫/🔽/⏬ priority, 🔁 recurrence), so cards created here are
+also visible to `tasks_aggregate` and any Dataview `TASK` query — there's
+no separate card format to learn. A lane with a `**Complete**` marker
+line is treated as the board's done column.
+
+#### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `kanban_create_board` | Create a full board with lanes and cards in one call |
+| `kanban_create_simple_board` | Scaffold an empty board with just lane headings |
+| `kanban_add_card` | Add a card to a lane (creates the lane if missing) |
+| `kanban_move_card` | Move a card to a different lane, preserving its dates/priority |
+| `kanban_complete_card` | Mark a card's checkbox done in place (does not move lanes) |
+| `kanban_read_board` | Parse a board into structured lanes and cards |
+| `kanban_lane_summary` | Quick card-count-per-lane summary |
+
+Note: completing a card does not automatically move it to a "Done"
+lane — call `kanban_move_card` afterwards if that's the desired result.
 
 ### Omnisearch
 
@@ -611,6 +737,7 @@ obsidian-mcp/
 │   │   ├── tasks.py
 │   │   ├── templater.py
 │   │   ├── excalidraw.py
+│   │   ├── kanban.py
 │   │   └── omnisearch.py
 │   ├── tools/                   ← MCP tool registrations
 │   │   ├── core.py
