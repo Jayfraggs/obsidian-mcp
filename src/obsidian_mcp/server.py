@@ -88,7 +88,10 @@ def _default_instructions() -> str:
         "well-linked knowledge rather than conversation-specific text. Use "
         "Dataview-friendly metadata, Tasks syntax for actionable items, Kanban for "
         "project planning, and generate Excalidraw diagrams when explaining systems, "
-        "architectures, workflows, or relationships. Preserve the vault's existing "
+        "architectures, workflows, or relationships. For Excalidraw never write "
+        "drawing JSON or .excalidraw.md files yourself: call excalidraw_get_schema "
+        "once, then excalidraw_create_diagram (or excalidraw_generate_flowchart) with "
+        "nodes and arrows, and excalidraw_edit_diagram to change one. Preserve the vault's existing "
         "organization and respond with a concise summary of changes after completing "
         "the requested operations."
     )

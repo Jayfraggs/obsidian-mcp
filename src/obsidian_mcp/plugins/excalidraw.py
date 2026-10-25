@@ -1,39 +1,17 @@
-"""ExcalidrawService – generate and manipulate Excalidraw diagram notes.
+"""ExcalidrawService – generate, validate and edit Excalidraw diagram notes.
 
-Produces ``.excalidraw.md`` files that Obsidian's Excalidraw plugin can
-open and edit.  All generation is static markdown — no Excalidraw instance
-required.
+Produces ``.excalidraw.md`` files that Obsidian's Excalidraw plugin opens
+natively.  All the hard parts (bound labels, two-way arrow bindings, relative
+arrow points, 8-char text ids, the ``## Text Elements`` section, compressed
+drawings) live in :mod:`obsidian_mcp.plugins.excalidraw_scene`; this service is
+the vault-facing layer on top of it.
 
-Element ID scheme: deterministic short IDs derived from position in the
-element list, making diffs readable and stable across re-generation.
-
-File format
------------
-The plugin's ``parsed`` mode requires:
-
-    ---
-    excalidraw-plugin: parsed
-    ...
-    ---
-
-    # Title
-
-    %%
-    ## Drawing
-    ```json
-    { ...scene JSON... }
-    ```
-    %%
-
-The JSON block MUST be inside ``%%...%%`` Obsidian comment delimiters.
-A bare fenced code block is silently ignored by the plugin.
-
-Bound arrows
-------------
-Excalidraw elements use bidirectional references so that moving a node
-also moves its connected arrows.  Every shape carries a ``boundElements``
-list and every arrow carries ``startBinding`` / ``endBinding`` dicts.
-Without these the diagram looks correct but arrows detach on drag.
+Design rule: **the LLM never writes scene JSON.**  It writes a small
+*skeleton* (nodes + arrows, optional coordinates) and the engine produces a
+complete, valid scene.  If a client writes ``.excalidraw.md`` through the
+generic note tools anyway, :meth:`ExcalidrawService.write_raw` validates and
+repairs it (or rejects it with an actionable message) instead of letting a
+broken drawing land in the vault.
 
 Script Engine integration
 -------------------------
@@ -50,15 +28,28 @@ note so the diagram appears inline.
 
 from __future__ import annotations
 
-import json
 import math
-import re
-from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
-from pathlib import Path
-
+from obsidian_mcp.errors import NoteNotFoundError
+from obsidian_mcp.plugins import excalidraw_scene as sc
 from obsidian_mcp.vault.service import VaultService
+
+DRAWING_SUFFIX = ".excalidraw.md"
+
+
+def is_drawing_path(path: str) -> bool:
+    """True for paths the Obsidian Excalidraw plugin treats as drawings."""
+    return path.lower().endswith(DRAWING_SUFFIX)
+
+
+GUIDANCE = (
+    "Do not hand-write .excalidraw.md JSON. Call excalidraw_get_schema, then "
+    "excalidraw_create_diagram (any diagram), excalidraw_generate_flowchart, "
+    "excalidraw_generate_architecture or excalidraw_generate_concept_map; "
+    "use excalidraw_edit_diagram to change an existing drawing."
+)
 
 # Directory containing bundled Script Engine .md files
 _SCRIPTS_DIR = Path(__file__).parent / "ea_scripts"
@@ -121,99 +112,208 @@ BUNDLED_SCRIPTS: dict[str, str] = {
         "text element and group them together.",
 }
 
-# ── Excalidraw file constants ──────────────────────────────────────────
-_EX_VERSION = 2
-_EX_SOURCE = "obsidian-mcp"
-_EX_APP_STATE: dict[str, Any] = {
-    "viewBackgroundColor": "transparent",
-    "gridSize": None,
+
+def _node_style(node_type: str) -> tuple[str, str]:
+    """Return (shape, bg_color) for a node type."""
+    return {
+        "service":   ("rectangle", "#dbe9ff"),
+        "database":  ("ellipse",   "#fce8ff"),
+        "queue":     ("rectangle", "#fff3bf"),
+        "external":  ("rectangle", "#e8f5e9"),
+        "user":      ("ellipse",   "#ffeedd"),
+        "container": ("rectangle", "#f0f0f0"),
+    }.get(node_type, ("rectangle", "transparent"))
+
+
+
+def _fail(error: str, problems: list[str] | None = None, **extra: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {"ok": False, "written": False, "error": error}
+    if problems:
+        out["problems"] = problems
+    out["hint"] = GUIDANCE
+    out.update(extra)
+    return out
+
+
+def _slim(res: dict[str, Any]) -> dict[str, Any]:
+    """Drop the echoed file body — a drawing's JSON is large and the caller never needs it back."""
+    res.pop("content", None)
+    return res
+
+
+def _out_path(path: str) -> str:
+    return path if is_drawing_path(path) else f"{path}{DRAWING_SUFFIX}"
+
+
+def _direction(value: str) -> str:
+    return "LR" if str(value).upper() in ("LR", "RL", "HORIZONTAL", "LEFT-TO-RIGHT") else "TB"
+
+
+SCHEMA: dict[str, Any] = {
+    "rule": (
+        "Never write .excalidraw.md JSON yourself. Describe the diagram as `elements` "
+        "(nodes + arrows) and let the server build the scene. Coordinates are optional: "
+        "omit x/y and shapes are laid out automatically following the arrows."
+    ),
+    "tools": {
+        "excalidraw_create_diagram": "Any diagram from an `elements` list (this schema).",
+        "excalidraw_generate_flowchart": "Flowcharts: steps with `next` links; start/decision shapes handled for you.",
+        "excalidraw_generate_architecture": "Typed nodes (service/database/queue/…) + edges.",
+        "excalidraw_generate_concept_map": "Radial map: centre + branches + leaves.",
+        "excalidraw_edit_diagram": "Add/remove/relabel/restyle elements in an existing drawing.",
+        "excalidraw_validate": "Check (and optionally repair) any existing drawing.",
+    },
+    "element_types": {
+        "rectangle | ellipse | diamond": {
+            "id": "your handle, e.g. 'api' (referenced by arrows)",
+            "label": "text shown inside the shape (long labels wrap automatically)",
+            "x, y, width, height": "optional; omit for auto layout/size",
+            "style (optional)": "backgroundColor, strokeColor, strokeStyle(solid|dashed|dotted), strokeWidth, fontSize",
+        },
+        "text": {"text": "free-standing text", "x, y": "optional", "fontSize": "optional"},
+        "arrow | line": {
+            "start": "node id (or {\"x\":..,\"y\":..} for a free end)",
+            "end": "node id (or {\"x\":..,\"y\":..})",
+            "label": "optional text on the arrow",
+            "style (optional)": "strokeStyle, strokeColor, startArrowhead, endArrowhead",
+        },
+    },
+    "example": [
+        {"id": "user", "type": "ellipse", "label": "User", "backgroundColor": "#ffeedd"},
+        {"id": "api", "type": "rectangle", "label": "API Gateway", "backgroundColor": "#dbe9ff"},
+        {"id": "db", "type": "ellipse", "label": "Postgres", "backgroundColor": "#fce8ff"},
+        {"type": "arrow", "start": "user", "end": "api", "label": "HTTPS"},
+        {"type": "arrow", "start": "api", "end": "db", "label": "SQL"},
+    ],
+    "colors": {"blue": "#dbe9ff", "yellow": "#fff3bf", "green": "#e8f5e9", "purple": "#fce8ff",
+               "orange": "#ffeedd", "grey": "#f0f0f0"},
+    "tips": [
+        "Reference nodes by the `id` you gave them; unknown ids are reported with the list of known ids.",
+        "`from`/`to` work as aliases for `start`/`end`; `text` works as an alias for `label`.",
+        "After creating, call excalidraw_embed_in_note to show it inline in a note.",
+        "To inspect an existing drawing use excalidraw_parse_elements(compact=true).",
+    ],
 }
-
-# Default style values
-_DEFAULT_STROKE = "#1e1e1e"
-_DEFAULT_BG = "transparent"
-_DEFAULT_FONT = 3       # 1=hand (Virgil), 2=normal (Helvetica), 3=mono (Cascadia)
-_DEFAULT_FONT_SIZE = 16
-_BOX_W = 180
-_BOX_H = 60
-_GAP_X = 80
-_GAP_Y = 80
-
-# Binding gap: pixels from element edge to arrow endpoint
-_BIND_GAP = 8
-
-
-@dataclass
-class ExElement:
-    """A single Excalidraw drawable element."""
-    id: str
-    type: str            # rectangle | ellipse | diamond | arrow | text | line
-    x: float
-    y: float
-    width: float
-    height: float
-    angle: float = 0.0
-    strokeColor: str = _DEFAULT_STROKE
-    backgroundColor: str = _DEFAULT_BG
-    fillStyle: str = "hachure"
-    strokeWidth: int = 2
-    strokeStyle: str = "solid"
-    roughness: int = 1
-    opacity: int = 100
-    # Text / label
-    text: str = ""
-    fontSize: int = _DEFAULT_FONT_SIZE
-    fontFamily: int = _DEFAULT_FONT
-    textAlign: str = "center"
-    verticalAlign: str = "middle"
-    # Binding (shapes): arrows that touch this element
-    boundElements: list[dict[str, str]] = field(default_factory=list)
-    # Arrow-specific
-    startBinding: dict[str, Any] | None = None
-    endBinding: dict[str, Any] | None = None
-    points: list[list[float]] = field(default_factory=lambda: [[0.0, 0.0], [1.0, 0.0]])
-    startArrowhead: str | None = None
-    endArrowhead: str = "arrow"
-
-    def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        is_arrow = self.type in ("arrow", "line")
-        is_shape = self.type in ("rectangle", "ellipse", "diamond")
-        is_text  = self.type == "text"
-
-        if not is_arrow:
-            for k in ("startBinding", "endBinding", "points", "startArrowhead", "endArrowhead"):
-                d.pop(k, None)
-        if is_arrow:
-            # Arrows don't need boundElements (shapes own the binding list)
-            d.pop("boundElements", None)
-            # Remove None arrowheads from output (cleaner JSON)
-            if d.get("startArrowhead") is None:
-                d.pop("startArrowhead", None)
-
-        if not (is_shape or is_text):
-            for k in ("text", "fontSize", "fontFamily", "textAlign", "verticalAlign"):
-                d.pop(k, None)
-
-        if not is_shape:
-            d.pop("boundElements", None)
-
-        # Remove empty label text from shapes/arrows to keep JSON tidy
-        if d.get("text") == "":
-            d.pop("text", None)
-
-        return d
 
 
 class ExcalidrawService:
-    """Generate Excalidraw architecture and concept diagrams."""
+    """Generate, validate and edit Excalidraw diagram notes."""
 
     def __init__(self, vault: VaultService) -> None:
         self._vault = vault
 
     # ------------------------------------------------------------------ #
-    # High-level diagram generators
+    # Schema / guidance
     # ------------------------------------------------------------------ #
+
+    def get_schema(self) -> dict[str, Any]:
+        """Return the skeleton format, an example and usage rules."""
+        return SCHEMA
+
+    # ------------------------------------------------------------------ #
+    # Creation
+    # ------------------------------------------------------------------ #
+
+    def _write_new(self, path: str, title: str, payload: dict[str, Any], *,
+                   overwrite: bool = False) -> dict[str, Any]:
+        out = _out_path(path)
+        content = sc.build_drawing_file(title, payload)
+        if overwrite:
+            try:
+                return self._vault.update_note(out, content)
+            except NoteNotFoundError:
+                pass
+        return self._vault.create_note(out, content)
+
+    def _finish(self, path: str, title: str, built: sc.BuildResult, *,
+                overwrite: bool = False) -> dict[str, Any]:
+        payload = sc.scene_payload(built.elements)
+        problems = [i for i in sc.validate_scene(payload) if i.severity == "error"]
+        if problems:   # defensive: the engine should never produce these
+            return _fail("Internal error: generated scene failed validation",
+                         [i.message for i in problems])
+        res = _slim(self._write_new(path, title, payload, overwrite=overwrite))
+        res.update(ok=True, element_count=len(built.elements), ids=built.ids,
+                   warnings=built.warnings)
+        return res
+
+    def create_diagram(
+        self,
+        path: str,
+        title: str,
+        elements: list[dict[str, Any]],
+        *,
+        direction: str = "TB",
+        layout: str = "layered",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create a drawing from a skeleton (see :meth:`get_schema`)."""
+        if not isinstance(elements, list) or not elements:
+            return _fail("`elements` must be a non-empty list. See excalidraw_get_schema.")
+        try:
+            built = sc.build_elements(elements, direction=_direction(direction),
+                                      layout=layout, origin=(60.0, 60.0))
+        except sc.SkeletonError as exc:
+            return _fail("Invalid elements — nothing was written. Fix these and retry:", exc.problems)
+        return self._finish(path, title, built, overwrite=overwrite)
+
+    def generate_flowchart(
+        self,
+        path: str,
+        title: str,
+        steps: list[dict[str, Any]],
+        *,
+        direction: str = "TB",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create a flowchart from steps with ``next`` links.
+
+        Each step: ``{"id", "label", "type": start|end|process|decision, "next": [id | {"to", "label"}]}``.
+        ``start``/``end`` → ellipse, ``decision`` → diamond, ``process`` → rectangle.
+        """
+        shape_for = {"start": ("ellipse", "#e8f5e9"), "end": ("ellipse", "#ffeedd"),
+                     "process": ("rectangle", "#dbe9ff"), "decision": ("diamond", "#fff3bf"),
+                     "io": ("rectangle", "#fce8ff")}
+        problems: list[str] = []
+        skeleton: list[dict[str, Any]] = []
+        arrows: list[dict[str, Any]] = []
+        for i, step in enumerate(steps or []):
+            if not isinstance(step, dict) or "id" not in step:
+                problems.append(f"steps[{i}]: needs an object with an 'id'")
+                continue
+            sid = str(step["id"])
+            kind = str(step.get("type", "process")).lower()
+            if kind not in shape_for:
+                problems.append(f"steps[{i}] ({sid}): type {kind!r} must be one of {', '.join(shape_for)}")
+                continue
+            shp, bg = shape_for[kind]
+            skeleton.append({"id": sid, "type": shp, "label": str(step.get("label", sid)),
+                             "backgroundColor": bg})
+            nxt = step.get("next", [])
+            if isinstance(nxt, (str, dict)):
+                nxt = [nxt]
+            for n in nxt or []:
+                if isinstance(n, dict):
+                    to, lab = n.get("to", n.get("id")), n.get("label")
+                else:
+                    to, lab = n, None
+                if to is None:
+                    problems.append(f"steps[{i}] ({sid}): a 'next' entry has no target")
+                    continue
+                arr: dict[str, Any] = {"type": "arrow", "start": sid, "end": str(to)}
+                if lab:
+                    arr["label"] = str(lab)
+                arrows.append(arr)
+        if problems:
+            return _fail("Invalid steps — nothing was written. Fix these and retry:", problems)
+        if not skeleton:
+            return _fail("`steps` must be a non-empty list.")
+        try:
+            built = sc.build_elements(skeleton + arrows, direction=_direction(direction),
+                                      origin=(60.0, 60.0))
+        except sc.SkeletonError as exc:
+            return _fail("Invalid steps — nothing was written. Fix these and retry:", exc.problems)
+        return self._finish(path, title, built, overwrite=overwrite)
 
     def generate_architecture(
         self,
@@ -223,6 +323,7 @@ class ExcalidrawService:
         edges: list[dict[str, str]],
         *,
         layout: str = "layered",
+        overwrite: bool = False,
     ) -> dict[str, Any]:
         """Generate an architecture diagram from an explicit node/edge spec.
 
@@ -235,53 +336,57 @@ class ExcalidrawService:
         edges:
             List of ``{"from": str, "to": str, "label": str | None}``.
         layout:
-            ``layered`` (left-to-right), ``grid``, or ``radial``.
+            ``layered`` (left-to-right, follows the edges), ``grid``, or ``radial``.
         """
-        positions = _layout_nodes(nodes, layout)
-        elements: list[ExElement] = []
-        id_counter = [0]
-
-        # node_id → (element_id, center_x, center_y)
-        node_meta: dict[str, tuple[str, float, float]] = {}
-
-        for node in nodes:
-            nid = node["id"]
-            pos = positions.get(nid, (0.0, 0.0))
-            x, y = pos
-            shape, bg = _node_style(node.get("type", "service"))
-            eid = _next_id(id_counter)
-            elem = _make_node_element(eid, shape, x, y, node.get("label", nid), bg)
-            elements.append(elem)
-            node_meta[nid] = (eid, x + _BOX_W / 2, y + _BOX_H / 2)
-
-        for edge in edges:
-            src_meta = node_meta.get(edge["from"])
-            dst_meta = node_meta.get(edge["to"])
-            if src_meta is None or dst_meta is None:
+        problems: list[str] = []
+        skeleton: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        for i, node in enumerate(nodes or []):
+            if not isinstance(node, dict) or "id" not in node:
+                problems.append(f"nodes[{i}]: needs an object with an 'id'")
                 continue
-            src_eid, sx, sy = src_meta
-            dst_eid, dx, dy = dst_meta
-            arrow_eid = _next_id(id_counter)
-            arrow = _make_bound_arrow(
-                arrow_eid,
-                (sx, sy), src_eid,
-                (dx, dy), dst_eid,
-                label=edge.get("label", ""),
+            nid = str(node["id"])
+            ntype = node.get("type", "service")
+            if ntype not in ("service", "database", "queue", "external", "user", "container"):
+                warnings.append(f"node {nid}: unknown type {ntype!r}, drawn as a plain rectangle")
+            shape, bg = _node_style(ntype)
+            skeleton.append({"id": nid, "type": shape, "label": str(node.get("label", nid)),
+                             "backgroundColor": bg})
+        for i, edge in enumerate(edges or []):
+            if not isinstance(edge, dict):
+                problems.append(f"edges[{i}]: must be an object with 'from' and 'to'")
+                continue
+            src = edge.get("from", edge.get("source"))
+            dst = edge.get("to", edge.get("target"))
+            if src is None or dst is None:
+                problems.append(f"edges[{i}]: needs both 'from' and 'to'")
+                continue
+            arr: dict[str, Any] = {"type": "arrow", "start": str(src), "end": str(dst)}
+            if edge.get("label"):
+                arr["label"] = str(edge["label"])
+            skeleton.append(arr)
+        if problems:
+            return _fail("Invalid nodes/edges — nothing was written. Fix these and retry:", problems)
+        if not nodes:
+            return _fail("`nodes` must be a non-empty list.")
+        try:
+            built = sc.build_elements(
+                skeleton, direction="LR",
+                layout=layout if layout in ("grid", "radial") else "layered",
+                origin=(60.0, 60.0),
             )
-            elements.append(arrow)
-            # Register arrow on both endpoint shapes
-            _bind_arrow_to_element(elements, src_eid, arrow_eid, "start")
-            _bind_arrow_to_element(elements, dst_eid, arrow_eid, "end")
-
-        output_path = path if path.endswith(".excalidraw.md") else f"{path}.excalidraw.md"
-        content = _build_excalidraw_md(title, elements)
-        return self._vault.create_note(output_path, content)
+        except sc.SkeletonError as exc:
+            return _fail("Invalid nodes/edges — nothing was written. Fix these and retry:", exc.problems)
+        built.warnings.extend(warnings)
+        return self._finish(path, title, built, overwrite=overwrite)
 
     def generate_concept_map(
         self,
         path: str,
         central_concept: str,
         branches: list[dict[str, Any]],
+        *,
+        overwrite: bool = False,
     ) -> dict[str, Any]:
         """Generate a radial concept map centred on one idea.
 
@@ -292,71 +397,224 @@ class ExcalidrawService:
             Each branch becomes a second-level node; its children are
             third-level leaf nodes.
         """
-        elements: list[ExElement] = []
-        id_counter = [0]
+        problems: list[str] = []
+        for i, b in enumerate(branches or []):
+            if not isinstance(b, dict) or not b.get("label"):
+                problems.append(f"branches[{i}]: needs an object with a 'label'")
+        if problems:
+            return _fail("Invalid branches — nothing was written. Fix these and retry:", problems)
+        if not central_concept or not str(central_concept).strip():
+            return _fail("`central_concept` must be non-empty.")
 
-        cx, cy = 400.0, 300.0
-        center_eid = _next_id(id_counter)
-        elements.append(_make_node_element(
-            center_eid, "ellipse",
-            cx - _BOX_W / 2, cy - _BOX_H / 2,
-            central_concept, "#fff3bf",
-        ))
+        W, H = 220, 70                      # planning size for branch/leaf boxes
+        n = max(len(branches), 1)
+        max_kids = max((len(b.get("children", [])) for b in branches), default=0)
+        fan = max(max_kids, 1) * (H + 30) + 60
+        r_branch = max(320.0, n * fan / (2 * math.pi))
+        cx = cy = r_branch + 380.0
+        skeleton: list[dict[str, Any]] = [{
+            "id": "center", "type": "ellipse", "label": str(central_concept),
+            "x": cx - 130, "y": cy - 50, "width": 260, "height": 100,
+            "backgroundColor": "#fff3bf",
+        }]
+        for bi, b in enumerate(branches):
+            a = 2 * math.pi * bi / n - math.pi / 2
+            ux, uy = math.cos(a), math.sin(a)
+            bx, by = cx + ux * r_branch, cy + uy * r_branch
+            bid = f"branch{bi}"
+            skeleton.append({"id": bid, "type": "rectangle", "label": str(b["label"]),
+                             "x": bx - W / 2, "y": by - H / 2, "width": W, "height": H,
+                             "backgroundColor": "#dbe9ff"})
+            skeleton.append({"type": "arrow", "start": "center", "end": bid})
+            kids = [str(c) for c in b.get("children", [])]
+            px, py = -uy, ux
+            step = abs(px) * (W + 30) + abs(py) * (H + 30)
+            for ci, kid in enumerate(kids):
+                off = (ci - (len(kids) - 1) / 2) * step
+                lx = bx + ux * 280 + px * off
+                ly = by + uy * 280 + py * off
+                lid = f"branch{bi}_leaf{ci}"
+                skeleton.append({"id": lid, "type": "rectangle", "label": kid,
+                                 "x": lx - W / 2, "y": ly - H / 2, "width": W, "height": H,
+                                 "backgroundColor": "#f0fff0"})
+                skeleton.append({"type": "arrow", "start": bid, "end": lid})
+        try:
+            built = sc.build_elements(skeleton)
+        except sc.SkeletonError as exc:   # pragma: no cover - skeleton is generated
+            return _fail("Could not build concept map", exc.problems)
+        return self._finish(path, str(central_concept), built, overwrite=overwrite)
 
-        branch_count = len(branches)
-        for b_idx, branch in enumerate(branches):
-            angle = (2 * math.pi * b_idx) / max(branch_count, 1)
-            bx = cx + math.cos(angle) * 280 - _BOX_W / 2
-            by = cy + math.sin(angle) * 200 - _BOX_H / 2
-            branch_eid = _next_id(id_counter)
-            elements.append(_make_node_element(
-                branch_eid, "rectangle", bx, by,
-                branch["label"], "#dbe9ff",
-            ))
-            branch_center = (bx + _BOX_W / 2, by + _BOX_H / 2)
+    # ------------------------------------------------------------------ #
+    # Reading
+    # ------------------------------------------------------------------ #
 
-            arrow_eid = _next_id(id_counter)
-            elements.append(_make_bound_arrow(
-                arrow_eid,
-                (cx, cy), center_eid,
-                branch_center, branch_eid,
-            ))
-            _bind_arrow_to_element(elements, center_eid, arrow_eid, "start")
-            _bind_arrow_to_element(elements, branch_eid, arrow_eid, "end")
-
-            children: list[str] = branch.get("children", [])
-            for c_idx, child_label in enumerate(children):
-                offset = (c_idx - len(children) / 2) * 100
-                perp = angle + math.pi / 2
-                lx = branch_center[0] + math.cos(angle) * 200 + math.cos(perp) * offset - _BOX_W / 2
-                ly = branch_center[1] + math.sin(angle) * 160 + math.sin(perp) * offset - _BOX_H / 2 + 20
-                leaf_eid = _next_id(id_counter)
-                elements.append(_make_node_element(leaf_eid, "rectangle", lx, ly, child_label, "#f0fff0"))
-                leaf_center = (lx + _BOX_W / 2, ly + _BOX_H / 2)
-                leaf_arrow_eid = _next_id(id_counter)
-                elements.append(_make_bound_arrow(
-                    leaf_arrow_eid,
-                    branch_center, branch_eid,
-                    leaf_center, leaf_eid,
-                ))
-                _bind_arrow_to_element(elements, branch_eid, leaf_arrow_eid, "start")
-                _bind_arrow_to_element(elements, leaf_eid, leaf_arrow_eid, "end")
-
-        output_path = path if path.endswith(".excalidraw.md") else f"{path}.excalidraw.md"
-        content = _build_excalidraw_md(central_concept, elements)
-        return self._vault.create_note(output_path, content)
-
-    def parse_elements(self, path: str) -> dict[str, Any]:
-        """Parse and return the element list from an existing Excalidraw note."""
+    def _load(self, path: str) -> tuple[dict[str, Any], sc.ParsedDrawing]:
         note = self._vault.read_note(path)
-        payload = _extract_json_payload(note["content"])
-        if payload is None:
-            return {"path": path, "elements": [], "error": "No valid Excalidraw JSON found."}
-        return {
-            "path": path,
-            "element_count": len(payload.get("elements", [])),
-            "elements": payload.get("elements", []),
-        }
+        return note, sc.parse_drawing(note["content"])
+
+    def parse_elements(self, path: str, *, compact: bool = False) -> dict[str, Any]:
+        """Parse and return the element list from an existing Excalidraw note.
+
+        Handles both plain ``json`` and ``compressed-json`` drawings.  With
+        ``compact=True`` returns a short nodes/connections summary instead of
+        raw elements (far fewer tokens).
+        """
+        note, parsed = self._load(path)
+        if parsed.payload is None:
+            return {"path": path, "elements": [], "error": parsed.error or "No valid Excalidraw JSON found."}
+        els = parsed.payload.get("elements", [])
+        out: dict[str, Any] = {"path": path, "element_count": len(els), "compressed": parsed.compressed}
+        if compact:
+            out.update(sc.summarize_scene(parsed.payload))
+        else:
+            out["elements"] = els
+        return out
+
+    # ------------------------------------------------------------------ #
+    # Validation / repair
+    # ------------------------------------------------------------------ #
+
+    def validate_drawing(self, path: str, *, repair: bool = False) -> dict[str, Any]:
+        """Check a drawing; with ``repair=True`` fix everything fixable and save."""
+        note, parsed = self._load(path)
+        if parsed.payload is None:
+            return {"path": path, "ok": False, "error": parsed.error, "issues": []}
+        issues = sc.validate_scene(parsed.payload)
+        result: dict[str, Any] = {"path": path, "repaired": False}
+        if repair and issues:
+            fixed, changes = sc.repair_scene(parsed.payload)
+            self._vault.update_note(path, sc.rewrite_drawing_file(note["content"], fixed))
+            result.update(repaired=True, changes=changes)
+            issues = sc.validate_scene(fixed)
+        result["issues"] = [i.to_dict() for i in issues]
+        result["ok"] = not any(i.severity == "error" for i in issues)
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Editing
+    # ------------------------------------------------------------------ #
+
+    def edit_diagram(
+        self,
+        path: str,
+        *,
+        add: list[dict[str, Any]] | None = None,
+        remove_ids: list[str] | None = None,
+        update: dict[str, dict[str, Any]] | None = None,
+        direction: str = "TB",
+    ) -> dict[str, Any]:
+        """Add / remove / relabel / restyle elements in an existing drawing.
+
+        ``add``        skeleton items (see :meth:`get_schema`); arrows may reference
+                       existing elements by id or handle.  Unpositioned new shapes are
+                       placed in a block below the existing content.
+        ``remove_ids`` ids/handles to delete — their labels and any arrows attached to
+                       them are removed too.
+        ``update``     ``{id_or_handle: {"label": "...", "backgroundColor": "...", ...}}``
+        """
+        note, parsed = self._load(path)
+        if parsed.payload is None:
+            return _fail(parsed.error or "Not a readable drawing", path=path)
+        try:
+            payload, repairs = sc.repair_scene(parsed.payload)
+        except ValueError as exc:
+            return _fail(str(exc), path=path)
+        els: list[dict[str, Any]] = payload["elements"]
+
+        def lookup() -> dict[str, dict[str, Any]]:
+            m: dict[str, dict[str, Any]] = {}
+            for e in els:
+                m[e["id"]] = e
+            for e in els:
+                h = (e.get("customData") or {}).get("handle")
+                if isinstance(h, str):
+                    m.setdefault(h, e)
+            return m
+
+        problems: list[str] = []
+        removed: list[str] = []
+
+        # ── remove ──────────────────────────────────────────────
+        if remove_ids:
+            look = lookup()
+            doomed: set[str] = set()
+            for ref in remove_ids:
+                tgt = look.get(ref)
+                if tgt is None:
+                    problems.append(f"remove_ids: {ref!r} not found")
+                else:
+                    doomed.add(tgt["id"])
+            changed = True
+            while changed:                      # cascade: labels + attached arrows
+                changed = False
+                for e in els:
+                    if e["id"] in doomed:
+                        continue
+                    attached = (e.get("containerId") in doomed) or any(
+                        isinstance(e.get(s), dict) and e[s].get("elementId") in doomed
+                        for s in ("startBinding", "endBinding"))
+                    if attached:
+                        doomed.add(e["id"])
+                        changed = True
+            removed = sorted(doomed)
+            els[:] = [e for e in els if e["id"] not in doomed]
+            for e in els:
+                if isinstance(e.get("boundElements"), list):
+                    e["boundElements"] = [r for r in e["boundElements"]
+                                          if not (isinstance(r, dict) and r.get("id") in doomed)]
+
+        # ── update ──────────────────────────────────────────────
+        if update:
+            look = lookup()
+            allowed = set(sc._STYLE_KEYS) | {"label"}
+            for ref, changes in update.items():
+                tgt = look.get(ref)
+                if tgt is None:
+                    problems.append(f"update: {ref!r} not found")
+                    continue
+                if not isinstance(changes, dict):
+                    problems.append(f"update[{ref!r}]: must be an object")
+                    continue
+                bad = [k for k in changes if k not in allowed]
+                if bad:
+                    problems.append(f"update[{ref!r}]: unsupported keys {bad}; allowed: {sorted(allowed)}")
+                    continue
+                for k, v in changes.items():
+                    if k == "label":
+                        if tgt["type"] == "text":
+                            tgt["text"] = tgt["originalText"] = str(v)
+                            tgt["width"], tgt["height"] = sc.measure_text(str(v), tgt.get("fontSize", 16))
+                        else:
+                            sc.set_label(els, tgt, str(v))
+                    else:
+                        tgt[k] = v
+                tgt["version"] = tgt.get("version", 1) + 1
+
+        # ── add ─────────────────────────────────────────────────
+        ids: dict[str, str] = {}
+        warnings: list[str] = []
+        if add:
+            bb = sc.bounds(els)
+            origin = (bb[0], bb[3] + sc.GAP_MAIN) if bb else (60.0, 60.0)
+            try:
+                built = sc.build_elements(add, existing=els, direction=_direction(direction),
+                                          origin=origin)
+                els.extend(built.elements)
+                ids, warnings = built.ids, built.warnings
+            except sc.SkeletonError as exc:
+                problems.extend(exc.problems)
+
+        if problems:
+            return _fail("Edit rejected — nothing was written. Fix these and retry:", problems, path=path)
+
+        errs = [i for i in sc.validate_scene(payload) if i.severity == "error"]
+        if errs:
+            return _fail("Edit would leave the drawing invalid — nothing was written",
+                         [i.message for i in errs], path=path)
+        res = _slim(self._vault.update_note(path, sc.rewrite_drawing_file(note["content"], payload)))
+        res.update(ok=True, ids=ids, removed=removed, warnings=warnings,
+                   repaired_before_edit=repairs, element_count=len(els))
+        return res
 
     def add_text_annotation(
         self,
@@ -367,26 +625,63 @@ class ExcalidrawService:
         y: float = 40.0,
     ) -> dict[str, Any]:
         """Add a floating text element to an existing Excalidraw note."""
-        note = self._vault.read_note(path)
-        payload = _extract_json_payload(note["content"])
-        if payload is None:
-            return {"path": path, "error": "No valid Excalidraw JSON found."}
+        note, parsed = self._load(path)
+        if parsed.payload is None:
+            return {"path": path, "error": parsed.error or "No valid Excalidraw JSON found."}
+        payload = parsed.payload
+        els = payload.setdefault("elements", [])
+        built = sc.build_elements([{"type": "text", "text": text, "x": x, "y": y}], existing=els)
+        els.extend(built.elements)
+        res = _slim(self._vault.update_note(path, sc.rewrite_drawing_file(note["content"], payload)))
+        res.update(ok=True, element_id=built.elements[0]["id"])
+        return res
 
-        elements = payload.get("elements", [])
-        new_id = f"text-{len(elements):04d}"
-        elements.append({
-            "id": new_id, "type": "text",
-            "x": x, "y": y, "width": 200, "height": 30,
-            "angle": 0, "strokeColor": _DEFAULT_STROKE,
-            "backgroundColor": "transparent", "fillStyle": "hachure",
-            "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
-            "opacity": 100, "text": text,
-            "fontSize": _DEFAULT_FONT_SIZE, "fontFamily": _DEFAULT_FONT,
-            "textAlign": "left", "verticalAlign": "top",
-        })
-        payload["elements"] = elements
-        new_content = _rebuild_excalidraw_md(note["content"], payload)
-        return self._vault.update_note(path, new_content)
+    # ------------------------------------------------------------------ #
+    # Guard for generic note tools
+    # ------------------------------------------------------------------ #
+
+    def write_raw(self, path: str, content: str, *, mode: str = "create") -> dict[str, Any]:
+        """Safely accept ``.excalidraw.md`` content written via ``create_note``/``update_note``.
+
+        The content is parsed, repaired (inline labels → bound text, two-way
+        bindings, defaults, …) and re-serialised in the canonical layout.  If it
+        cannot be understood, nothing is written and the caller gets guidance.
+        """
+        parsed = sc.parse_drawing(content)
+        if parsed.payload is None:
+            return _fail(
+                "This is an Excalidraw drawing but its content is not a readable scene — nothing was written. "
+                + (parsed.error or ""),
+            )
+        try:
+            fixed, changes = sc.repair_scene(parsed.payload)
+        except ValueError as exc:
+            return _fail(f"Scene is not valid Excalidraw JSON — nothing was written: {exc}")
+        errs = [i for i in sc.validate_scene(fixed) if i.severity == "error"]
+        if errs:
+            return _fail("Scene still invalid after automatic repair — nothing was written",
+                         [f"{i.element_id or ''}: {i.message}".strip(": ") for i in errs])
+        if content.strip().startswith("{"):
+            stem = Path(path).name[: -len(DRAWING_SUFFIX)] or "Drawing"
+            final = sc.build_drawing_file(stem, fixed)
+        else:
+            final = sc.rewrite_drawing_file(sc.ensure_plugin_frontmatter(content), fixed)
+        res = _slim(self._vault.update_note(path, final) if mode == "update"
+                    else self._vault.create_note(path, final))
+        res.update(
+            ok=True, repaired=changes,
+            note=("Drawing was written through the generic note tool and normalised. "
+                  "Prefer excalidraw_create_diagram / excalidraw_edit_diagram next time."),
+        )
+        return res
+
+    @staticmethod
+    def blocked_edit(op: str) -> dict[str, Any]:
+        """Message for ``append_note``/``str_replace_note`` aimed at a drawing."""
+        return _fail(
+            f"{op} on an Excalidraw drawing would corrupt its JSON — nothing was changed. "
+            "Use excalidraw_edit_diagram (add/remove/update elements) or excalidraw_add_annotation."
+        )
 
     def install_scripts(
         self,
@@ -553,169 +848,3 @@ class ExcalidrawService:
             return self._vault.update_note(note_path, new_content)
         except Exception:
             return self._vault.create_note(note_path, embed_line.lstrip() + "\n")
-
-
-# ── Element factories ──────────────────────────────────────────────────
-
-def _make_node_element(
-    eid: str, shape: str, x: float, y: float,
-    label: str, bg_color: str,
-) -> ExElement:
-    return ExElement(
-        id=eid, type=shape,
-        x=x, y=y, width=_BOX_W, height=_BOX_H,
-        backgroundColor=bg_color,
-        fillStyle="solid",
-        text=label,
-        boundElements=[],   # populated later by _bind_arrow_to_element
-    )
-
-
-def _make_bound_arrow(
-    eid: str,
-    src: tuple[float, float], src_elem_id: str,
-    dst: tuple[float, float], dst_elem_id: str,
-    *,
-    label: str = "",
-) -> ExElement:
-    """Create an arrow with proper startBinding/endBinding for drag-attached behaviour."""
-    sx, sy = src
-    dx, dy = dst
-    rel_dx = dx - sx
-    rel_dy = dy - sy
-    return ExElement(
-        id=eid, type="arrow",
-        x=sx, y=sy,
-        width=abs(rel_dx), height=abs(rel_dy),
-        points=[[0.0, 0.0], [rel_dx, rel_dy]],
-        text=label,
-        strokeStyle="solid",
-        roughness=0,
-        startBinding={"elementId": src_elem_id, "focus": 0.0, "gap": _BIND_GAP},
-        endBinding={"elementId": dst_elem_id, "focus": 0.0, "gap": _BIND_GAP},
-        endArrowhead="arrow",
-    )
-
-
-def _bind_arrow_to_element(
-    elements: list[ExElement],
-    shape_eid: str,
-    arrow_eid: str,
-    side: str,  # "start" | "end"
-) -> None:
-    """Append an arrow reference to the shape's boundElements list."""
-    for elem in elements:
-        if elem.id == shape_eid:
-            elem.boundElements.append({"id": arrow_eid, "type": "arrow"})
-            return
-
-
-# ── Layout algorithms ──────────────────────────────────────────────────
-
-def _layout_nodes(
-    nodes: list[dict[str, Any]],
-    layout: str,
-) -> dict[str, tuple[float, float]]:
-    positions: dict[str, tuple[float, float]] = {}
-    n = len(nodes)
-    if layout == "radial":
-        cx, cy = 400.0, 300.0
-        for i, node in enumerate(nodes):
-            angle = (2 * math.pi * i) / max(n, 1)
-            x = cx + math.cos(angle) * 260 - _BOX_W / 2
-            y = cy + math.sin(angle) * 180 - _BOX_H / 2
-            positions[node["id"]] = (x, y)
-    elif layout == "grid":
-        cols = math.ceil(math.sqrt(n))
-        for i, node in enumerate(nodes):
-            col = i % cols
-            row = i // cols
-            positions[node["id"]] = (
-                60.0 + col * (_BOX_W + _GAP_X),
-                60.0 + row * (_BOX_H + _GAP_Y),
-            )
-    else:  # layered (left-to-right)
-        for i, node in enumerate(nodes):
-            positions[node["id"]] = (
-                60.0 + i * (_BOX_W + _GAP_X),
-                120.0,
-            )
-    return positions
-
-
-def _node_style(node_type: str) -> tuple[str, str]:
-    """Return (shape, bg_color) for a node type."""
-    return {
-        "service":   ("rectangle", "#dbe9ff"),
-        "database":  ("ellipse",   "#fce8ff"),
-        "queue":     ("rectangle", "#fff3bf"),
-        "external":  ("rectangle", "#e8f5e9"),
-        "user":      ("ellipse",   "#ffeedd"),
-        "container": ("rectangle", "#f0f0f0"),
-    }.get(node_type, ("rectangle", "transparent"))
-
-
-# ── File format helpers ────────────────────────────────────────────────
-
-def _build_excalidraw_md(title: str, elements: list[ExElement]) -> str:
-    """Produce a valid .excalidraw.md file with the %% Drawing block."""
-    payload = {
-        "type": "excalidraw",
-        "version": _EX_VERSION,
-        "source": _EX_SOURCE,
-        "elements": [e.to_dict() for e in elements],
-        "appState": _EX_APP_STATE,
-    }
-    json_str = json.dumps(payload, indent=2, sort_keys=True)
-    # IMPORTANT: the JSON must live inside %%...%% comment delimiters,
-    # under the "## Drawing" heading. A bare fenced code block is ignored
-    # by the Excalidraw plugin in parsed mode.
-    return (
-        "---\n"
-        "excalidraw-plugin: parsed\n"
-        f"title: {title}\n"
-        "tags: [excalidraw, diagram]\n"
-        "---\n\n"
-        f"# {title}\n\n"
-        "%%\n"
-        "## Drawing\n"
-        "```json\n"
-        f"{json_str}\n"
-        "```\n"
-        "%%\n"
-    )
-
-
-def _extract_json_payload(content: str) -> dict[str, Any] | None:
-    """Extract the Excalidraw JSON scene from a note's content."""
-    # Try %% comment block first (parsed mode), then bare code block
-    m = re.search(r"%%.*?```json\s*\n([\s\S]+?)\n```.*?%%", content, re.DOTALL)
-    if not m:
-        m = re.search(r"```json\s*\n([\s\S]+?)\n```", content)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
-
-
-def _rebuild_excalidraw_md(original: str, payload: dict[str, Any]) -> str:
-    """Replace the JSON block inside a %%...%% section, or bare if absent."""
-    new_json_block = f"```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```"
-    # Try to replace inside %% block
-    replaced = re.sub(
-        r"(%%.*?)```json\s*\n[\s\S]+?\n```(.*?%%)",
-        lambda m: m.group(1) + new_json_block + m.group(2),
-        original, count=1, flags=re.DOTALL,
-    )
-    if replaced != original:
-        return replaced
-    # Fallback: replace bare code block
-    return re.sub(r"```json\s*\n[\s\S]+?\n```", new_json_block, original, count=1)
-
-
-def _next_id(counter: list[int]) -> str:
-    idx = counter[0]
-    counter[0] += 1
-    return f"el-{idx:04d}"

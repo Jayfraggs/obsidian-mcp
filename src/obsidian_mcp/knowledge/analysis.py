@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 import json
-import math
 import re
 from typing import Any
 
@@ -243,59 +242,37 @@ def build_dataview_dashboard(title: str, tags: list[str]) -> str:
 
 
 def generate_excalidraw_markdown(title: str, graph: dict[str, list[dict[str, Any]]]) -> str:
-    """Generate an Excalidraw-compatible markdown note for a relationship graph."""
-    elements: list[dict[str, Any]] = []
-    positions: dict[str, tuple[int, int]] = {}
+    """Generate an Excalidraw-compatible markdown note for a relationship graph.
+
+    Built with the shared scene engine so every node carries its title as a
+    bound text label and every edge is a properly bound arrow (the previous
+    implementation put text on the rectangle itself, which Excalidraw ignores).
+    """
+    from obsidian_mcp.plugins import excalidraw_scene as sc
+
+    skeleton: list[dict[str, Any]] = []
+    handles: dict[str, str] = {}
     for index, node in enumerate(graph.get("nodes", [])):
-        angle = (2 * math.pi * index) / max(len(graph.get("nodes", [])), 1)
-        x = round(math.cos(angle) * 260)
-        y = round(math.sin(angle) * 180)
-        positions[node["id"]] = (x, y)
-        elements.append(
-            {
-                "id": f"node-{index}",
-                "type": "rectangle",
-                "x": x,
-                "y": y,
-                "width": 180,
-                "height": 60,
-                "text": node["title"],
-            }
-        )
-
-    for index, edge in enumerate(graph.get("edges", [])):
-        if edge["source"] not in positions or edge["target"] not in positions:
+        handle = f"node{index}"
+        handles[node["id"]] = handle
+        skeleton.append({"id": handle, "type": "rectangle", "label": str(node.get("title") or node["id"]),
+                         "backgroundColor": "#dbe9ff"})
+    seen: set[tuple[str, str, str]] = set()
+    for edge in graph.get("edges", []):
+        src, dst = handles.get(edge["source"]), handles.get(edge["target"])
+        if src is None or dst is None or src == dst:
             continue
-        source_x, source_y = positions[edge["source"]]
-        target_x, target_y = positions[edge["target"]]
-        elements.append(
-            {
-                "id": f"edge-{index}",
-                "type": "arrow",
-                "x": source_x,
-                "y": source_y,
-                "points": [[0, 0], [target_x - source_x, target_y - source_y]],
-            }
-        )
-
-    payload = {"type": "excalidraw", "version": 2, "source": "obsidian-mcp", "elements": elements}
-    json_str = json.dumps(payload, indent=2, sort_keys=True)
-    # Excalidraw plugin (parsed mode) requires the JSON inside a %% comment block
-    # under a ## Drawing heading. A regular fenced code block is NOT recognised.
-    return (
-        "---\n"
-        "excalidraw-plugin: parsed\n"
-        "tags: [excalidraw, diagram]\n"
-        f"title: {title}\n"
-        "---\n\n"
-        f"# {title}\n\n"
-        "%%\n"
-        "## Drawing\n"
-        "```json\n"
-        f"{json_str}\n"
-        "```\n"
-        "%%\n"
-    )
+        label = f"#{edge['tag']}" if edge.get("type") == "tag" and edge.get("tag") else ""
+        key = (src, dst, label)
+        if key in seen:
+            continue
+        seen.add(key)
+        arrow: dict[str, Any] = {"type": "arrow", "start": src, "end": dst}
+        if label:
+            arrow["label"] = label
+        skeleton.append(arrow)
+    built = sc.build_elements(skeleton, direction="LR", origin=(60.0, 60.0))
+    return sc.build_drawing_file(title, sc.scene_payload(built.elements))
 
 
 def _first_match(pattern: re.Pattern[str], text: str) -> str | None:

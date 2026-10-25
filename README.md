@@ -392,7 +392,7 @@ Open `http://localhost:8765` in your browser.
 | **Dataview** | Build dashboards, inspect fields, generate queries |
 | **Tasks** | Browse, create, complete Tasks-plugin tasks |
 | **Templater** | List, preview, apply, and create templates |
-| **Excalidraw** | Generate architecture and concept-map diagrams; install Script Engine tools |
+| **Excalidraw** | Generate, edit and validate diagrams (flowcharts, architecture, concept maps, free-form); install Script Engine tools |
 | **Kanban** | Create and manage Kanban-plugin boards, lanes, and cards |
 | **Omnisearch** | Audit and optimise note discoverability |
 | **AI Rules** | Set behavioural rules the AI must follow |
@@ -580,7 +580,8 @@ The MCP and the Script Engine serve different roles and are **not** interchangea
 
 | Responsibility | How |
 |----------------|-----|
-| Generate a new diagram from scratch | AI calls `excalidraw_generate_architecture` or `excalidraw_generate_concept_map` — produces a correct `.excalidraw.md` file with bound arrows |
+| Generate a new diagram from scratch | AI calls `excalidraw_create_diagram` (any diagram), `excalidraw_generate_flowchart`, `excalidraw_generate_architecture` or `excalidraw_generate_concept_map` — produces a valid `.excalidraw.md` with bound labels and arrows |
+| Change an existing diagram | AI calls `excalidraw_edit_diagram` (add / remove / relabel / restyle) |
 | Embed a diagram inline in a note | AI calls `excalidraw_embed_in_note` — inserts `![[drawing.excalidraw.md]]` into any markdown note |
 | Install scripts for the user | AI calls `excalidraw_install_scripts` |
 | Run **Auto Layout** on a diagram | User selects elements, runs **Excalidraw Script: Auto Layout** from the command palette |
@@ -630,15 +631,33 @@ layer for interactive editing after the AI generates the initial diagram.
 | `user` | Ellipse | Orange |
 | `container` | Rectangle | Grey |
 
-**Layouts:** `layered` (left-to-right) · `grid` · `radial`
+**Layouts:** `layered` (follows the arrows; `TB` or `LR`) · `grid` · `radial`
+
+#### Why the AI never writes diagram JSON
+
+LLMs routinely emit Excalidraw JSON that looks right but is broken: labels put
+on rectangles (Excalidraw ignores them — labels must be separate bound text
+elements), one-way arrow bindings, missing fields, absolute arrow points.
+So the model describes a diagram as a small list of nodes and arrows, and the
+server builds the full scene. If a client writes a `.excalidraw.md` through
+`create_note` / `update_note` anyway, the content is **validated and repaired**
+(or rejected with an explanation); `append_note` / `str_replace_note` refuse
+drawings. Existing drawings saved by Obsidian with *compressed JSON* are read
+transparently. Edited drawings are written as plain JSON, and Obsidian
+re-compresses them on its next save.
 
 #### MCP tools
 
 | Tool | Description |
 |------|-------------|
-| `excalidraw_generate_architecture` | Generate a diagram from explicit node/edge spec |
-| `excalidraw_generate_concept_map` | Generate a radial concept map |
-| `excalidraw_parse_elements` | Read element list from an existing drawing |
+| `excalidraw_get_schema` | The element format, an example and rules — call first |
+| `excalidraw_create_diagram` | Any diagram from nodes + arrows; coordinates optional (auto layout) |
+| `excalidraw_generate_flowchart` | Flowchart from steps with `next` links (start/decision/process shapes) |
+| `excalidraw_generate_architecture` | Typed nodes (service/database/queue/…) + edges |
+| `excalidraw_generate_concept_map` | Radial concept map |
+| `excalidraw_edit_diagram` | Add / remove / relabel / restyle elements in an existing drawing |
+| `excalidraw_validate` | Check a drawing for problems; `repair=true` fixes them in place |
+| `excalidraw_parse_elements` | Read an existing drawing (plain or compressed); `compact=true` for a short summary |
 | `excalidraw_add_annotation` | Add a floating text element to a drawing |
 | `excalidraw_embed_in_note` | Insert `![[drawing]]` transclusion into a markdown note |
 | `excalidraw_install_scripts` | Install bundled Script Engine files into the vault |

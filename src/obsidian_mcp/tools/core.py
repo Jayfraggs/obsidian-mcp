@@ -3,6 +3,7 @@
 from typing import Any, Protocol
 
 from obsidian_mcp.config import ObsidianMCPSettings
+from obsidian_mcp.plugins.excalidraw import ExcalidrawService, is_drawing_path
 from obsidian_mcp.vault.service import VaultService
 
 CORE_TOOL_NAMES = (
@@ -42,6 +43,9 @@ def register_core_tools(
         filesystem-backed service is created from ``settings.vault_path``.
     """
     service = vault_service or VaultService(settings.vault_path)
+    # Excalidraw drawings are JSON the LLM routinely gets subtly wrong; route writes
+    # to them through the validating/repairing path instead of straight to disk.
+    excalidraw = ExcalidrawService(service)
 
     @server.tool("read_note")
     def read_note(path: str, include_backlinks: bool = False):
@@ -50,17 +54,32 @@ def register_core_tools(
 
     @server.tool("create_note")
     def create_note(path: str, content: str):
-        """Create a markdown note in the configured Obsidian vault."""
+        """Create a markdown note in the configured Obsidian vault.
+
+        For Excalidraw diagrams (.excalidraw.md) do NOT write JSON here — use
+        excalidraw_create_diagram. Drawings written here are validated and
+        repaired, or rejected with an explanation.
+        """
+        if is_drawing_path(path):
+            return excalidraw.write_raw(path, content, mode="create")
         return service.create_note(path, content)
 
     @server.tool("update_note")
     def update_note(path: str, content: str):
-        """Replace the full content of a markdown note."""
+        """Replace the full content of a markdown note.
+
+        For Excalidraw diagrams (.excalidraw.md) use excalidraw_edit_diagram;
+        content written here is validated and repaired, or rejected.
+        """
+        if is_drawing_path(path):
+            return excalidraw.write_raw(path, content, mode="update")
         return service.update_note(path, content)
 
     @server.tool("append_note")
     def append_note(path: str, content: str):
-        """Append content to a markdown note."""
+        """Append content to a markdown note (not for .excalidraw.md drawings)."""
+        if is_drawing_path(path):
+            return excalidraw.blocked_edit("append_note")
         return service.append_note(path, content)
 
     @server.tool("str_replace_note")
@@ -74,7 +93,11 @@ def register_core_tools(
 
         If old_str occurs more than once, add more surrounding context
         (e.g. a preceding heading or line) to make it unique before retrying.
+
+        Not for .excalidraw.md drawings — use excalidraw_edit_diagram.
         """
+        if is_drawing_path(path):
+            return excalidraw.blocked_edit("str_replace_note")
         return service.str_replace_note(path, old_str, new_str)
 
     @server.tool("str_replace_vault")
