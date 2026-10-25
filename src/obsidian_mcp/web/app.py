@@ -497,11 +497,22 @@ def _persist_rules(rules: str) -> None:
         pass
 
 
+_TOOL_GUIDANCE = (
+    "EXCALIDRAW: never write drawing JSON or .excalidraw.md content yourself. "
+    "Call excalidraw_get_schema once, then excalidraw_create_diagram (any diagram) or "
+    "excalidraw_generate_flowchart with nodes and arrows — coordinates are optional. "
+    "Change an existing drawing with excalidraw_edit_diagram."
+)
+
+
 def _build_system_prompt(rules: str) -> str:
     """Build the full system prompt injected at the start of each MCP session."""
     active_rules = [r.strip() for r in rules.splitlines() if r.strip() and not r.startswith("#")]
     if not active_rules:
-        return "You are an Obsidian vault assistant. No additional rules are configured."
+        return (
+            "You are an Obsidian vault assistant. No additional rules are configured.\n\n"
+            + _TOOL_GUIDANCE
+        )
     rules_block = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(active_rules))
     return (
         "You are an Obsidian vault assistant with access to MCP tools that can read "
@@ -509,6 +520,8 @@ def _build_system_prompt(rules: str) -> str:
         "VAULT RULES — You MUST follow these rules in every action:\n"
         + rules_block
         + "\n\nOnly deviate from these rules if the user explicitly overrides one in their message."
+        + "\n\n"
+        + _TOOL_GUIDANCE
     )
 
 

@@ -42,8 +42,13 @@ PLUGIN_TOOL_NAMES = (
     "templater_apply",
     "templater_create_template",
     # Excalidraw
+    "excalidraw_get_schema",
+    "excalidraw_create_diagram",
+    "excalidraw_generate_flowchart",
     "excalidraw_generate_architecture",
     "excalidraw_generate_concept_map",
+    "excalidraw_edit_diagram",
+    "excalidraw_validate",
     "excalidraw_parse_elements",
     "excalidraw_add_annotation",
     "excalidraw_write_script",
@@ -354,6 +359,77 @@ def register_plugin_tools(
 
     # ── Excalidraw ────────────────────────────────────────────────────
 
+    @server.tool("excalidraw_get_schema")
+    def excalidraw_get_schema() -> dict[str, Any]:
+        """START HERE for any Excalidraw diagram. Returns the element format, an example and rules.
+
+        Never write .excalidraw.md JSON by hand (create_note/update_note on a
+        drawing are validated and may be rejected). Describe the diagram as a
+        list of nodes and arrows and let excalidraw_create_diagram build it.
+        """
+        return ex.get_schema()
+
+    @server.tool("excalidraw_create_diagram")
+    def excalidraw_create_diagram(
+        path: str,
+        title: str,
+        elements: list[dict[str, Any]],
+        direction: str = "TB",
+        layout: str = "layered",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create ANY Excalidraw diagram from nodes and arrows. No coordinates needed.
+
+        elements is a list of:
+          {"id": "api", "type": "rectangle|ellipse|diamond", "label": "API Gateway",
+           "backgroundColor": "#dbe9ff"}                       (x, y, width, height optional)
+          {"type": "text", "text": "Note", "x": 0, "y": 0}
+          {"type": "arrow", "start": "api", "end": "db", "label": "SQL"}
+
+        Shapes without x/y are laid out automatically following the arrows.
+        Labels are attached correctly and arrows are bound to their shapes, so
+        they follow when the user drags a node. On any problem NOTHING is
+        written and every problem is listed so you can fix them in one retry.
+        Call excalidraw_get_schema for the full format.
+
+        Args:
+            path: Output vault path (.excalidraw.md appended if missing).
+            title: Diagram title.
+            elements: Nodes and arrows as above.
+            direction: "TB" (top→bottom, default) or "LR" (left→right).
+            layout: "layered" (default, follows arrows) | "grid" | "radial".
+            overwrite: Replace the file if it exists.
+        """
+        return ex.create_diagram(path, title, elements, direction=direction,
+                                 layout=layout, overwrite=overwrite)
+
+    @server.tool("excalidraw_generate_flowchart")
+    def excalidraw_generate_flowchart(
+        path: str,
+        title: str,
+        steps: list[dict[str, Any]],
+        direction: str = "TB",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create a flowchart. Simplest tool for processes and decisions.
+
+        steps: [{"id": "s1", "label": "Start", "type": "start", "next": ["s2"]},
+                {"id": "s2", "label": "Valid?", "type": "decision",
+                 "next": [{"to": "s3", "label": "yes"}, {"to": "s4", "label": "no"}]},
+                {"id": "s3", "label": "Save", "type": "process", "next": ["s5"]}, ...]
+        type: start | end | process (default) | decision | io.
+        start/end become ellipses, decision a diamond, process a rectangle.
+        Layout, sizes, colours and arrows are handled for you.
+
+        Args:
+            path: Output vault path (.excalidraw.md appended if missing).
+            title: Flowchart title.
+            steps: Steps as above; every `next` target must be a step id.
+            direction: "TB" (default) or "LR".
+            overwrite: Replace the file if it exists.
+        """
+        return ex.generate_flowchart(path, title, steps, direction=direction, overwrite=overwrite)
+
     @server.tool("excalidraw_generate_architecture")
     def excalidraw_generate_architecture(
         path: str,
@@ -361,27 +437,31 @@ def register_plugin_tools(
         nodes: list[dict[str, Any]],
         edges: list[dict[str, str]],
         layout: str = "layered",
+        overwrite: bool = False,
     ) -> dict[str, Any]:
-        """Generate an Excalidraw architecture diagram from a node/edge specification.
+        """Generate an architecture diagram from typed nodes and edges.
 
         Creates a .excalidraw.md file that Obsidian's Excalidraw plugin can open.
-        Use excalidraw_embed_in_note afterwards to display the diagram inline in any .md note.
+        Use excalidraw_embed_in_note afterwards to display the diagram inline.
+        Unknown node ids in edges are reported (nothing is written).
 
         Args:
             path: Output vault path (will append .excalidraw.md if needed).
             title: Diagram title.
             nodes: List of {id, label, type} where type is one of:
-                   service | database | queue | external | user
+                   service | database | queue | external | user | container
             edges: List of {from, to, label?} connecting node IDs.
-            layout: "layered" (L→R) | "grid" | "radial".
+            layout: "layered" (L→R, follows edges) | "grid" | "radial".
+            overwrite: Replace the file if it exists.
         """
-        return ex.generate_architecture(path, title, nodes, edges, layout=layout)
+        return ex.generate_architecture(path, title, nodes, edges, layout=layout, overwrite=overwrite)
 
     @server.tool("excalidraw_generate_concept_map")
     def excalidraw_generate_concept_map(
         path: str,
         central_concept: str,
         branches: list[dict[str, Any]],
+        overwrite: bool = False,
     ) -> dict[str, Any]:
         """Generate a radial concept map centred on one idea.
 
@@ -391,16 +471,55 @@ def register_plugin_tools(
             path: Output vault path.
             central_concept: The central node label.
             branches: List of {label, children: [str]} — second and third level nodes.
+            overwrite: Replace the file if it exists.
         """
-        return ex.generate_concept_map(path, central_concept, branches)
+        return ex.generate_concept_map(path, central_concept, branches, overwrite=overwrite)
+
+    @server.tool("excalidraw_edit_diagram")
+    def excalidraw_edit_diagram(
+        path: str,
+        add: list[dict[str, Any]] | None = None,
+        remove_ids: list[str] | None = None,
+        update: dict[str, dict[str, Any]] | None = None,
+        direction: str = "TB",
+    ) -> dict[str, Any]:
+        """Change an existing drawing: add, remove, relabel or restyle elements.
+
+        Use this instead of editing .excalidraw.md text (append_note and
+        str_replace_note refuse drawings). Get ids from
+        excalidraw_parse_elements(compact=true).
+
+        add:        same items as excalidraw_create_diagram; arrows may point at
+                    existing nodes by id. New shapes without x/y are placed below
+                    the existing content.
+        remove_ids: ids to delete; their labels and attached arrows go too.
+        update:     {"api": {"label": "New name", "backgroundColor": "#fff3bf"}}
+                    keys: label, backgroundColor, strokeColor, fillStyle,
+                    strokeWidth, strokeStyle, roughness, opacity.
+        Nothing is written if any part is invalid.
+        """
+        return ex.edit_diagram(path, add=add, remove_ids=remove_ids, update=update,
+                               direction=direction)
+
+    @server.tool("excalidraw_validate")
+    def excalidraw_validate(path: str, repair: bool = False) -> dict[str, Any]:
+        """Check an Excalidraw drawing for problems, optionally fixing them.
+
+        Detects labels Excalidraw would ignore, one-way arrow bindings, missing
+        fields, bad arrow points and more. repair=true fixes everything fixable
+        in place (embedded images and other content are preserved).
+        """
+        return ex.validate_drawing(path, repair=repair)
 
     @server.tool("excalidraw_parse_elements")
-    def excalidraw_parse_elements(path: str) -> dict[str, Any]:
-        """Parse and return the element list from an existing Excalidraw note.
+    def excalidraw_parse_elements(path: str, compact: bool = False) -> dict[str, Any]:
+        """Parse an existing Excalidraw note (plain or compressed).
 
-        Returns {path, element_count, elements[]}.
+        compact=true returns {nodes, connections, free_text} with ids and labels
+        — far smaller than the raw element list and what you need before
+        excalidraw_edit_diagram. Default returns {path, element_count, elements[]}.
         """
-        return ex.parse_elements(path)
+        return ex.parse_elements(path, compact=compact)
 
     @server.tool("excalidraw_add_annotation")
     def excalidraw_add_annotation(
