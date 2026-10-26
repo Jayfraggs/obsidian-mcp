@@ -905,6 +905,7 @@ Internal technical references are in the [`DOCS/`](DOCS/) folder.
 | [DOCS/codebase_reference.md](DOCS/codebase_reference.md) | Full function and class registry for every module |
 | [DOCS/backlink-index.md](DOCS/backlink-index.md) | `BacklinkIndex` architecture, cold-start persistence, watchdog live updates, thread safety, performance, logging reference |
 | [DOCS/setup-wizard.md](DOCS/setup-wizard.md) | Setup wizard and server launcher architecture, module reference, extension guide |
+| [DOCS/development.md](DOCS/development.md) | Dev setup, running the tests (`uv run pytest`), dependency policy |
 
 ---
 

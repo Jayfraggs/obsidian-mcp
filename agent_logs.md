@@ -247,3 +247,29 @@
 - Verified `.venv\Scripts\python.exe -m obsidian_mcp check` passes against the configured vault and REST adapter.
 - Verified touched files pass ruff.
 - Full `_test_` collection still has pre-existing duplicate basename issues, and importlib-mode full suite has unrelated pre-existing failures.
+
+## 2026-10-26 - Main Housekeeping (stale tests, packaging, path safety)
+
+### Investigation
+
+- Ran the full suite on `main`: 102 passed, 4 failed, and collection needed `--import-mode=importlib`.
+- Classified each failure instead of adjusting tests blindly: three were stale expectations (relationship-graph tag edges and `read_note` backlinks are opt-in by design; `build_server()` was removed from `__main__`), one was a real bug (`Path("C:/x").is_absolute()` is False on Linux/macOS, so Windows-absolute paths were accepted as relative there).
+- Found `mcp>=1.0.0` unpinned (mcp 2.x removed `mcp.server.fastmcp`), `testpaths` pointing at a non-existent `tests/`, a dead duplicate `_default_instructions()` in `server.py`, and `icon.png` referenced by `server.py`/`pyproject.toml`/`setup_wizard.py` but never committed (only `icon.ico`).
+- Noted, not changed: the standalone `fastmcp` dependency is never imported; `[tool.uv] dev-dependencies` is deprecated.
+
+### Code Changes
+
+- `pyproject.toml`: `mcp>=1.22,<2` (1.22 is the oldest release verified with the `Icon` API under current pydantic), `testpaths=["_test_"]`, `addopts=--import-mode=importlib`; `uv.lock` refreshed (one-line diff, locked mcp stays 1.27.2).
+- `vault/paths.py`: also reject absolute paths under Windows rules on every OS.
+- `server.py`: removed the unreachable duplicate `_default_instructions()`; moved imports above `_load_icon()`.
+- Added `src/obsidian_mcp/icon.png` as a lossless conversion of the tracked 96x96 `icon.ico` (separate commit so it can be replaced by the original).
+
+### Tests and Verification
+
+- Updated the three stale tests to assert the documented behaviour (both modes), parametrized the absolute-path test (drive, backslash, UNC, POSIX) and added a positive relative-path test and an icon regression test.
+- `uv run pytest`: 111 passed, 0 failed, no flags.
+
+### Documentation
+
+- Added `DOCS/development.md`; corrected stale statements in `DOCS/AICONTEXT.md`, `DOCS/codebase_reference.md` and `DOCS/features/core-mcp-tools.md`.
+

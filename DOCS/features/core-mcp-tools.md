@@ -14,7 +14,7 @@ Core tools use a service-backed design:
 
 - `obsidian_mcp.vault.*` modules own vault path safety, metadata extraction, and filesystem behavior.
 - `obsidian_mcp.tools.core` owns MCP tool registration.
-- `obsidian_mcp.__main__.build_server()` wires core tool registration into the existing server factory.
+- `obsidian_mcp.__main__.main()` wires core tool registration into the server factory (`create_server`).
 
 ## Plugin Compatibility
 

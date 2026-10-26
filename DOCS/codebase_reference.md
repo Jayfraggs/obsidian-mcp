@@ -61,8 +61,8 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 
 ### `obsidian_mcp.__main__`
 
-- `build_server() -> FastMCP`: loads settings, configures logging, and creates the server.
-- `main() -> None`: runs the configured server.
+- `_build_vault_service() -> tuple[ObsidianMCPSettings, VaultService, Logger]`: loads settings, configures logging, selects the adapter and builds the vault service (single-vault path). Replaced the old `build_server()` wrapper.
+- `main() -> None`: builds the vault service, creates the server with `create_server(...)`, starts the backlink index and runs the stdio server.
 - `build_web_app()`: loads settings, configures logging, and creates the FastAPI Web UI app.
 - `web_main() -> None`: runs the configured local Web UI server.
 - `check_config() -> None`: validates local configuration and prints ASCII-safe status output.
@@ -82,7 +82,7 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 
 - `VaultPathResolver`: resolves vault-relative paths safely.
 - `VaultPathResolver.resolve_note_path(relative_path: str | Path) -> Path`: resolves note paths and adds `.md` when missing.
-- `VaultPathResolver.resolve_relative_path(relative_path: str | Path) -> Path`: resolves general vault-relative paths.
+- `VaultPathResolver.resolve_relative_path(relative_path: str | Path) -> Path`: resolves general vault-relative paths. Rejects empty paths, `..` traversal, anything resolving outside the vault, and absolute paths of **any** flavour on every OS (POSIX, Windows drive `C:/x`, UNC) — `Path.is_absolute()` alone misses Windows paths on Linux/macOS.
 - `VaultPathResolver.to_vault_relative(path: Path) -> str`: converts an absolute vault path to POSIX-style relative path.
 
 ### `obsidian_mcp.vault.metadata`

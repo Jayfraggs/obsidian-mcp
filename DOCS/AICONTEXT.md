@@ -1,6 +1,6 @@
 # AI Context
 
-Last updated: 2026-07-20
+Last updated: 2026-10-26
 
 ## Project State
 
@@ -33,7 +33,7 @@ Prompt 1 is implemented as a Python 3.11+ package foundation with:
 - Type hints and docstrings.
 - Tests stored under `_test_`.
 
-Verification passed with `uv run --extra dev pytest -v` and `uv run python -c "from obsidian_mcp.__main__ import build_server; print(build_server)"`.
+Verification: `uv run --extra dev pytest` (see `DOCS/development.md`). The original `build_server()` wrapper was later replaced by `_build_vault_service()` + `create_server()` in `obsidian_mcp.__main__`.
 
 ## Core Tools Status
 
@@ -73,7 +73,9 @@ Deferred Prompt 3 platform features remain SQLite metadata cache, multi-user aut
 - On 2026-07-20, startup was fixed after `_persist_now` was accidentally dedented out of `BacklinkIndex`, which also trapped helper methods such as `_rel` outside the class method surface.
 - `python -m obsidian_mcp check` now uses ASCII status labels so it works in Windows CP1252 consoles.
 - Focused regression tests for these fixes live in `_test_/unit/vault/test_index.py` and `_test_/unit/test_main.py`.
-- Full-suite pytest collection is currently blocked by duplicate `test_service.py` basenames unless `--import-mode=importlib` is used. With importlib mode, several pre-existing expectation/config tests still fail outside this bugfix.
+- Plain `pytest` now collects and passes the whole suite: `pyproject.toml` points `testpaths` at `_test_` and sets `--import-mode=importlib` (2026-10-26). The four tests that used to fail were three stale expectations (tag edges and backlinks are opt-in by design; `build_server()` no longer exists) and one real bug (Windows-absolute paths were accepted as relative on Linux/macOS) — all fixed. See `DOCS/development.md`.
+- `mcp` is pinned `<2` because mcp 2.x removed `mcp.server.fastmcp`.
+- `src/obsidian_mcp/icon.png` was referenced but never committed, so the server and wizard icons silently did not load on fresh clones; it is now tracked and covered by a test.
 
 ## Documentation Rules In Use
 
