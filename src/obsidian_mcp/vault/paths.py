@@ -1,6 +1,6 @@
 """Safe path resolution for Obsidian vault operations."""
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from obsidian_mcp.errors import VaultPathError
 
@@ -25,7 +25,9 @@ class VaultPathResolver:
 
         if not path_text:
             raise VaultPathError("Path must not be empty.")
-        if path.is_absolute():
+        # `Path("C:/x").is_absolute()` is False on Linux/macOS, so also test Windows rules —
+        # a vault synced between machines must reject the same paths everywhere.
+        if path.is_absolute() or PureWindowsPath(path_text).is_absolute():
             raise VaultPathError("Path must be relative to the vault.")
         if any(part == ".." for part in path.parts):
             raise VaultPathError("Path must not contain parent traversal.")
