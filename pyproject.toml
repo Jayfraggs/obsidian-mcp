@@ -67,6 +67,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["_test_"]
+# Root-level scripts (setup_wizard.py, server_launcher.py) are imported by tests; this makes the
+# plain `pytest` command work, not only `python -m pytest` (which adds the cwd to sys.path).
+pythonpath = ["."]
 # Several test modules share a basename (test_service.py, ...) without __init__.py files;
 # importlib mode avoids "import file mismatch" collection errors.
 addopts = "--import-mode=importlib"

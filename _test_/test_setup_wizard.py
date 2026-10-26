@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Add repo root to path so we can import setup_wizard without installing
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parent.parent      # _test_/ -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
 

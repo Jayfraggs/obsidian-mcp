@@ -239,7 +239,7 @@ include them in `_build_env_dict` or `_build_server_command` as appropriate.
 
 ## Testing
 
-Tests live at `_test_/unit/test_setup_wizard.py`. They mock all GUI
+Tests live at `_test_/test_setup_wizard.py`. They mock all GUI
 modules (`customtkinter`, `pystray`, `tkinter`) at import time so tests
 run headlessly with no display required.
 
@@ -261,7 +261,7 @@ The test file covers:
 Run with:
 
 ```bash
-pytest _test_/unit/test_setup_wizard.py -v
+pytest _test_/test_setup_wizard.py -v
 ```
 
 The `test_server_start_sets_running` test uses a threading event to avoid a

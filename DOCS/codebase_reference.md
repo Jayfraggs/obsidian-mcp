@@ -198,7 +198,7 @@ as a subprocess via `uv run obsidian-mcp`.
 - `StatusPanel(ctk.CTkToplevel)`: Floating status window. Thread-safe methods: `append_log(str)`, `update_status(str)`. `_on_close` withdraws instead of destroying.
 - `TrayController`: Owns root, icon, panel. `run()` blocks until quit. `_open_panel` always dispatches to tkinter thread via `root.after`.
 
-### `_test_/unit/test_setup_wizard.py`
+### `_test_/test_setup_wizard.py`
 
 - 31 tests covering OS detection, config path resolution, `.env` write,
   Claude Desktop JSON merge (including merge-safety and atomic write),

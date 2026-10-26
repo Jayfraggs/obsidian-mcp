@@ -27,6 +27,7 @@ No extra flags are needed — `pyproject.toml` configures:
 | Setting | Value | Why |
 |---------|-------|-----|
 | `testpaths` | `["_test_"]` | Tests live in `_test_/` (it used to point at a non-existent `tests/`). |
+| `pythonpath` | `["."]` | Tests import root-level scripts (`setup_wizard.py`, `server_launcher.py`); this makes plain `pytest` work, not only `python -m pytest` (which adds the cwd to `sys.path`). |
 | `addopts` | `--import-mode=importlib` | Several modules share a basename (`test_service.py`, …) and the folders have no `__init__.py`; the default import mode fails collection on that. |
 | `asyncio_mode` | `auto` | `pytest-asyncio` runs `async def` tests without decorators. |
 
@@ -60,7 +61,7 @@ or schema.
   work with the `Icon` API (`server.py`) under current pydantic; older ones fail
   on a pydantic internal import before that is even reached.
 - After editing `pyproject.toml` dependencies run `uv lock` and commit
-  `uv.lock`; `uv lock --check` should pass in CI.
+  `uv.lock`; `uv lock --check` should pass.
 - Known cleanup candidates (not changed here): the standalone `fastmcp` package
   is listed in `dependencies` but nothing imports it (the server uses
   `mcp.server.fastmcp`), and `[tool.uv] dev-dependencies` is deprecated in favour
