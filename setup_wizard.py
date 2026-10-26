@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 # ── Bootstrap: install customtkinter if missing ────────────────────────────
@@ -178,6 +178,123 @@ def _create_windows_shortcut(lnk: Path, py: str, target: str, workdir: str) -> N
     subprocess.check_call(["powershell", "-Command", ps], timeout=15)
 
 
+# ── Multi-vault helpers (pure functions — unit-tested without a GUI) ───────
+
+_VAULT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,47}$")
+
+
+def slugify_vault_name(text: str) -> str:
+    """Turn a folder name like 'My Work Vault' into a valid vault name ('my-work-vault')."""
+    slug = re.sub(r"[^A-Za-z0-9_.\-]+", "-", text.strip()).strip("-.").lower()
+    return slug[:48] or "vault"
+
+
+def to_posix_path(path: str) -> str:
+    """Forward-slash form of *path*; detects Windows paths (``C:\\x``, ``\\\\server\\x``) on any OS."""
+    path = path.strip()
+    if re.match(r"^[A-Za-z]:[\\/]|^\\\\", path):
+        return PureWindowsPath(path).as_posix()
+    return Path(path).as_posix()
+
+
+def collect_vault_rows(primary: dict[str, str], extras: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Primary vault + any filled-in additional vaults as plain dicts (untouched rows are skipped).
+
+    *primary* keys: vault_path, vault_name, adapter_api_key, adapter_host, adapter_port, adapter_mode.
+    Additional vaults share the primary's host and always use ``auto`` mode (no key → direct files).
+    """
+    path = primary["vault_path"].strip()
+    host = primary.get("adapter_host", "").strip() or "127.0.0.1"
+    rows = [{
+        "name": primary.get("vault_name", "").strip() or slugify_vault_name(Path(to_posix_path(path)).name),
+        "path": path,
+        "api_key": primary.get("adapter_api_key", "").strip(),
+        "host": host,
+        "port": primary.get("adapter_port", "").strip() or "27123",
+        "mode": primary.get("adapter_mode", "auto"),
+    }]
+    for r in extras:
+        vals = {k: str(v).strip() for k, v in r.items()}
+        if not vals.get("name") and not vals.get("path") and not vals.get("api_key"):
+            continue
+        rows.append({"name": vals.get("name", ""), "path": vals.get("path", ""),
+                     "api_key": vals.get("api_key", ""), "port": vals.get("port", ""),
+                     "host": host, "mode": "auto"})
+    return rows
+
+
+def validate_vault_rows(rows: list[dict[str, str]]) -> str | None:
+    """Return a user-facing error for the first problem in *rows*, or None.
+
+    Each row: ``name, path, api_key, host, port`` (strings).  Mirrors the server's own rules
+    so mistakes are caught here instead of at startup: unique names, existing folders, and —
+    because every Obsidian vault runs its own Local REST API plugin — one REST endpoint
+    per keyed vault.
+    """
+    names: dict[str, str] = {}
+    paths: dict[str, str] = {}
+    endpoints: dict[tuple[str, str], str] = {}
+    for i, r in enumerate(rows, start=1):
+        label = r.get("name") or f"vault {i}"
+        name = r.get("name", "").strip()
+        if not _VAULT_NAME_RE.match(name):
+            return (f"Vault {i}: '{name}' is not a valid name. Use letters, digits, '-', '_' or '.' "
+                    "(no spaces), e.g. 'work'.")
+        if name.lower() in names:
+            return f"Two vaults are named '{name}'. Names must be unique."
+        names[name.lower()] = name
+        path = r.get("path", "").strip()
+        if not path or not Path(path).is_dir():
+            return f"Vault '{label}': '{path}' is not an existing folder."
+        resolved = str(Path(path).resolve())
+        if resolved in paths:
+            return f"Vaults '{paths[resolved]}' and '{name}' point to the same folder."
+        paths[resolved] = name
+        if r.get("api_key", "").strip():
+            port = r.get("port", "").strip()
+            if not port.isdigit() or not (1 <= int(port) <= 65535):
+                return f"Vault '{name}': REST API port '{port}' is not a valid port number."
+            endpoint = (r.get("host", "127.0.0.1").strip() or "127.0.0.1", port)
+            if endpoint in endpoints:
+                return (f"Vaults '{endpoints[endpoint]}' and '{name}' use the same REST API port {port}. "
+                        "Each vault runs its own Local REST API plugin — give each a different port "
+                        "(Obsidian → Settings → Local REST API) and enter that vault's own key.")
+            endpoints[endpoint] = name
+    return None
+
+
+def build_vaults_env_value(rows: list[dict[str, str]]) -> str:
+    """Value for ``OBSIDIAN_MCP_VAULTS``.
+
+    Readable ``name=path;name=path`` when no vault needs REST settings; otherwise JSON with each
+    vault's **own** key/host/port.  JSON paths use forward slashes (valid on Windows) so the value
+    survives python-dotenv's backslash handling.
+    """
+    needs_json = any(r.get("api_key", "").strip() or r.get("mode", "auto") not in ("auto", "filesystem")
+                     for r in rows)
+    if not needs_json:
+        return ";".join(f"{r['name'].strip()}={r['path'].strip()}" for r in rows)
+    out = []
+    for r in rows:
+        entry: dict[str, Any] = {"name": r["name"].strip(), "path": to_posix_path(r["path"])}
+        key = r.get("api_key", "").strip()
+        if key:
+            entry.update(adapter_api_key=key, adapter_host=r.get("host", "127.0.0.1").strip() or "127.0.0.1",
+                         adapter_port=int(r.get("port", "27123") or 27123))
+        mode = r.get("mode", "auto")
+        if mode != "auto":
+            entry["adapter_mode"] = mode
+        out.append(entry)
+    return json.dumps(out, separators=(",", ":"), ensure_ascii=True)
+
+
+def format_env_line(key: str, value: str) -> str:
+    """One ``KEY=value`` line for .env.  JSON values are single-quoted so dotenv keeps them intact."""
+    if value[:1] in ("[", "{"):
+        return f"{key}='{value.replace(chr(39), chr(92) + chr(39))}'"
+    return f"{key}={value}"
+
+
 # ── .env writer ───────────────────────────────────────────────────────────
 
 def write_env(fields: dict[str, str]) -> None:
@@ -187,7 +304,7 @@ def write_env(fields: dict[str, str]) -> None:
         "",
     ]
     for key, value in fields.items():
-        lines.append(f"{key}={value}")
+        lines.append(format_env_line(key, value))
     get_env_path().write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -332,6 +449,8 @@ class SetupWizard(ctk.CTk):
         v = self.fields
         b = self.booleans
         v["vault_path"]        = ctk.StringVar()
+        v["vault_name"]        = ctk.StringVar()
+        self.extra_vaults: list[dict[str, Any]] = []   # additional vaults: name/path/api_key/port StringVars
         v["server_name"]       = ctk.StringVar(value="obsidian-mcp")
         v["log_level"]         = ctk.StringVar(value="INFO")
         v["permission_profile"]= ctk.StringVar(value="safe_write")
@@ -490,6 +609,13 @@ class SetupWizard(ctk.CTk):
                     )
                     return False
 
+            rows = self._collect_vault_rows()
+            if len(rows) > 1:
+                problem = validate_vault_rows(rows)
+                if problem:
+                    messagebox.showwarning("Check your vaults", problem)
+                    return False
+
         return True
 
     # ══════════════════════════════════════════════════════════════════
@@ -615,6 +741,18 @@ class SetupWizard(ctk.CTk):
         _field_row(f, "Vault Path *", self.fields["vault_path"],
                    browse=lambda: self._browse_folder("vault_path"),
                    hint="Absolute path to your Obsidian vault folder")
+        _field_row(f, "Vault Name", self.fields["vault_name"],
+                   hint="Optional. Short name the AI uses for this vault (e.g. 'work'). Only needed with several vaults.")
+
+        # ── Additional vaults ──
+        _body(f, "Using more than one vault? Each Obsidian vault runs its own Local REST API plugin, "
+                 "so each needs its own API key and its own port. The key and port in the Adapter "
+                 "section below belong to the vault above.", text_color="gray")
+        self._extra_vaults_frame = ctk.CTkFrame(f, fg_color="transparent")
+        self._extra_vaults_frame.pack(fill="x")
+        self._render_extra_vaults()
+        ctk.CTkButton(f, text="+ Add another vault", width=160, fg_color="transparent",
+                      border_width=1, command=self._add_extra_vault).pack(anchor="w", padx=24, pady=6)
 
         # ── Server ──
         _section(f, "Server")
@@ -705,7 +843,7 @@ class SetupWizard(ctk.CTk):
         _body(f, "The following will be written to your .env file. Click Next to proceed.")
 
         env_dict = self._build_env_dict()
-        preview = "\n".join(f"{k}={v}" for k, v in env_dict.items())
+        preview = "\n".join(format_env_line(k, v) for k, v in env_dict.items())
 
         box = ctk.CTkTextbox(f, height=260, font=ctk.CTkFont(family="Courier", size=12))
         box.pack(fill="x", padx=24, pady=12)
@@ -856,6 +994,52 @@ class SetupWizard(ctk.CTk):
         if path:
             self.fields[field_key].set(path)
 
+    # ── Additional vaults ──────────────────────────────────────────────
+
+    def _add_extra_vault(self) -> None:
+        n = len(self.extra_vaults)
+        self.extra_vaults.append({
+            "name": ctk.StringVar(), "path": ctk.StringVar(), "api_key": ctk.StringVar(),
+            # Obsidian's REST plugin defaults to 27123 (HTTP) / 27124 (HTTPS); step by 2 to avoid clashes.
+            "port": ctk.StringVar(value=str(27123 + 2 * (n + 1))),
+        })
+        self._render_extra_vaults()
+
+    def _remove_extra_vault(self, row: dict[str, Any]) -> None:
+        self.extra_vaults.remove(row)
+        self._render_extra_vaults()
+
+    def _browse_extra_vault(self, row: dict[str, Any]) -> None:
+        path = filedialog.askdirectory(title="Select the vault folder")
+        if path:
+            row["path"].set(path)
+            if not row["name"].get().strip():
+                row["name"].set(slugify_vault_name(Path(path).name))
+
+    def _render_extra_vaults(self) -> None:
+        frame = self._extra_vaults_frame
+        for w in frame.winfo_children():
+            w.destroy()
+        for i, row in enumerate(self.extra_vaults, start=2):
+            card = ctk.CTkFrame(frame, fg_color=BG_CARD)
+            card.pack(fill="x", padx=24, pady=6)
+            ctk.CTkLabel(card, text=f"Vault {i}", font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color=ACCENT).pack(anchor="w", padx=12, pady=(8, 0))
+            _field_row(card, "Name *", row["name"], hint="Short name, e.g. 'personal'")
+            _field_row(card, "Path *", row["path"], browse=lambda r=row: self._browse_extra_vault(r))
+            _field_row(card, "API Key", row["api_key"], password=True,
+                       hint="From THIS vault's Local REST API plugin. Leave empty for direct file access.")
+            _field_row(card, "Port", row["port"], hint="This vault's REST API port — must differ from the other vaults")
+            ctk.CTkButton(card, text="Remove", width=80, fg_color="transparent", border_width=1,
+                          command=lambda r=row: self._remove_extra_vault(r)).pack(anchor="e", padx=12, pady=(0, 8))
+
+    def _collect_vault_rows(self) -> list[dict[str, str]]:
+        """Primary vault + any filled-in additional vaults (see ``collect_vault_rows``)."""
+        primary = {k: self.fields[k].get() for k in
+                   ("vault_path", "vault_name", "adapter_api_key", "adapter_host", "adapter_port", "adapter_mode")}
+        extras = [{k: var.get() for k, var in r.items()} for r in self.extra_vaults]
+        return collect_vault_rows(primary, extras)
+
     def _copy_to_clipboard(self, text: str) -> None:
         self.clipboard_clear()
         self.clipboard_append(text)
@@ -880,6 +1064,9 @@ class SetupWizard(ctk.CTk):
         if b["enable_web_ui"].get():
             d["OBSIDIAN_MCP_WEB_HOST"] = v["web_host"].get()
             d["OBSIDIAN_MCP_WEB_PORT"] = v["web_port"].get()
+        rows = self._collect_vault_rows()
+        if len(rows) > 1:           # several vaults: every vault carries its own REST key/port
+            d["OBSIDIAN_MCP_VAULTS"] = build_vaults_env_value(rows)
         return d
 
     def _build_server_command(self) -> list[str]:

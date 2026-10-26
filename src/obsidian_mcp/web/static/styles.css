@@ -164,3 +164,14 @@ code{font-family:ui-monospace,monospace;font-size:12px}
   .sidebar-section{display:none}
   .two-col,.three-col,.perm-grid{grid-template-columns:1fr}
 }
+
+/* ── Multi-vault ─────────────────────────────────────────────────── */
+[hidden]{display:none!important}
+.hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+.vault-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.vault-row:last-child{border-bottom:0}
+.vault-row .vname{font-weight:600;min-width:90px}
+.vault-row .vpath{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vault-row .vtag{font-size:11px;color:var(--muted);white-space:nowrap}
+.vault-row.active .vname::after{content:" ●";color:var(--accent)}
+.vault-row button{padding:2px 8px;font-size:11px}

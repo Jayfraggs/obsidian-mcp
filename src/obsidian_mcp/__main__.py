@@ -37,6 +37,34 @@ def _build_vault_service():
     return settings, vault_service, logger
 
 
+def _load_runtime():
+    """Return ``(settings, vault_service, registry, logger)``.
+
+    One configured vault → exactly the legacy path (``registry`` is None).
+    Several vaults → a ``VaultRegistry`` plus a ``VaultRouter`` that stands in for
+    the vault service; only the default vault is started here, the rest start on
+    first use so one offline Obsidian instance cannot block the server.
+    """
+    from obsidian_mcp.config import load_settings
+
+    settings = load_settings()
+    if len(getattr(settings, "vaults", ()) or ()) > 1:
+        from obsidian_mcp.logging import configure_logging, get_logger
+        from obsidian_mcp.vault.registry import VaultRegistry, VaultRouter
+
+        configure_logging(settings.log_level)
+        logger = get_logger("main")
+        registry = VaultRegistry(settings.vaults, default=settings.default_vault)
+        logger.info(
+            "obsidian-mcp starting | %d vaults: %s | default=%s",
+            len(registry), ", ".join(registry.names()), registry.default_name,
+        )
+        registry.start_default()
+        return settings, VaultRouter(registry), registry, logger
+    settings, vault_service, logger = _build_vault_service()
+    return settings, vault_service, None, logger
+
+
 def main() -> None:
     """Run the MCP stdio server (used by Claude Desktop and all MCP clients)."""
     try:
@@ -46,7 +74,7 @@ def main() -> None:
         from obsidian_mcp.tools.plugins import register_plugin_tools
         from obsidian_mcp.web.app import _build_system_prompt, _load_rules
 
-        settings, vault_service, logger = _build_vault_service()
+        settings, vault_service, registry, logger = _load_runtime()
 
         rules = _load_rules()
         rule_count = len(
@@ -64,10 +92,11 @@ def main() -> None:
             ),
             vault_service=vault_service,
             system_prompt=system_prompt,
+            vault_registry=registry,
         )
 
         logger.info("Building backlink index and starting watcher …")
-        vault_service.start()
+        vault_service.start()          # multi-vault: no-op for the already-started default vault
 
         logger.info("MCP server ready — waiting for client.")
         try:
@@ -115,14 +144,14 @@ def web_main() -> None:
 
         from obsidian_mcp.web.app import create_web_app
 
-        settings, vault_service, logger = _build_vault_service()
+        settings, vault_service, registry, logger = _load_runtime()
         logger.info("Building backlink index and starting watcher …")
         vault_service.start()
         logger.info("Web UI starting at http://%s:%s", settings.web_host, settings.web_port)
 
         try:
             uvicorn.run(
-                create_web_app(settings, vault_service=vault_service),
+                create_web_app(settings, vault_service=vault_service, vault_registry=registry),
                 host=settings.web_host,
                 port=settings.web_port,
                 log_level=settings.log_level.value.lower(),
@@ -153,6 +182,10 @@ def check_config() -> None:
         api_key_status = "set" if settings.adapter_api_key else "not set (filesystem mode)"
         print(f"[OK] adapter_api_key:     {api_key_status}")
 
+        vaults = list(getattr(settings, "vaults", ()) or ())
+        if len(vaults) > 1:
+            return _check_multi_vault(settings, vaults)
+
         from obsidian_mcp.adapters import AutoAdapter
         adapter = AutoAdapter.from_settings(settings)
         alive = adapter.health_check()
@@ -170,6 +203,41 @@ def check_config() -> None:
         print(f"\n[ERROR] Configuration error: {exc}")
         traceback.print_exc()
         sys.exit(1)
+
+
+def _check_multi_vault(settings, vaults) -> None:
+    """Report every configured vault and its own adapter.  Exits 1 if the default vault is unreachable."""
+    from obsidian_mcp.adapters import AutoAdapter
+
+    print(f"[OK] vaults configured:   {len(vaults)} (default: {settings.default_vault})")
+    default_ok = True
+    unreachable: list[str] = []
+    for cfg in vaults:
+        try:
+            adapter = AutoAdapter.from_settings(cfg)
+            alive = adapter.health_check()
+            status = f"{adapter.backend_name} ({'reachable' if alive else 'ERROR: unreachable'})"
+        except Exception as exc:           # a vault in rest-only mode whose Obsidian is closed
+            alive, status = False, f"ERROR: {exc}"
+        marker = "OK" if alive else "ERROR"
+        key = "own REST key" if cfg.adapter_api_key else "no REST key (direct file access)"
+        print(f"[{marker}] vault {cfg.name}: {cfg.path}")
+        print(f"        adapter: {status}; {key}; mode={cfg.adapter_mode.value}")
+        if not alive:
+            unreachable.append(cfg.name)
+        if cfg.name == settings.default_vault and not alive:
+            default_ok = False
+    if not default_ok:
+        print("\n[ERROR] The default vault is unreachable - check its path / REST settings")
+        sys.exit(1)
+    if unreachable:
+        print(f"\n[WARN] Default vault is fine, but not reachable: {', '.join(unreachable)}. "
+              "The server will start; those vaults will report an error when used "
+              "(open Obsidian with its Local REST API plugin, or fix the key/port).")
+    else:
+        print("\nAll checks passed.")
+    print("Run with: python -m obsidian_mcp")
+    sys.exit(0)
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────

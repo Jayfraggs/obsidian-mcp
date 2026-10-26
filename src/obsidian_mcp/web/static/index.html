@@ -12,6 +12,10 @@
   <h1>Obsidian <span>MCP</span></h1>
   <p id="server-status">Loading…</p>
   <div class="topbar-right">
+    <div class="profile-chip" id="vault-chip" hidden>
+      <span>Vault</span>
+      <select id="vault-select" aria-label="Active vault"></select>
+    </div>
     <div class="profile-chip">
       <span>Profile</span>
       <select id="profile">
@@ -427,6 +431,16 @@
             Without a key, notes are read and written directly from disk.
           </p>
 
+          <div class="field" id="adapter-vault-field" hidden>
+            <label>Vault</label>
+            <select id="adapter-vault"></select>
+            <p class="hint">
+              Every Obsidian vault runs its <b>own</b> Local REST API plugin, so each vault has its own
+              key. Copy the key from <i>that</i> vault's plugin settings, and give each vault a
+              different port. Changes apply to the selected vault only.
+            </p>
+          </div>
+
           <div class="field">
             <label>API Key</label>
             <div class="key-input-wrap">
@@ -446,6 +460,11 @@
           <div class="status-row" id="adapter-status-row">
             <span class="status-dot grey" id="adapter-dot"></span>
             <span id="adapter-status-text">Not tested</span>
+          </div>
+
+          <div id="vaults-overview" hidden>
+            <h4 style="margin:18px 0 6px;font-size:12px;color:var(--muted)">All vaults</h4>
+            <div id="vaults-overview-rows"></div>
           </div>
         </div>
 

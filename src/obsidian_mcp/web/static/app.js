@@ -110,10 +110,87 @@ document.getElementById("profile").addEventListener("change", async (e) => {
 async function loadStatus() {
   const s = await GET("/api/status");
   const keyIcon = s.adapter_key_set ? "🔌" : "💾";
+  const vaultName = s.vault ? `${s.vault}  ·  ` : "";
   document.getElementById("server-status").textContent =
-    `${s.server_name}  ·  ${s.vault_path}  ·  ${keyIcon} ${s.adapter}`;
+    `${s.server_name}  ·  ${vaultName}${s.vault_path}  ·  ${keyIcon} ${s.adapter}`;
+  if (s.vault_error) toast(`Vault "${s.vault}" is unavailable: ${s.vault_error}`, "error", 6000);
   return s;
 }
+
+// ── Vaults (multi-vault) ───────────────────────────────────────────
+// adapterVault = vault whose REST settings the Settings view is editing (null = single vault).
+let adapterVault = null;
+let adapterKeySet = false;
+const vaultQS = () => (adapterVault ? `?vault=${encodeURIComponent(adapterVault)}` : "");
+
+function renderVaultsOverview(data) {
+  const box = document.getElementById("vaults-overview");
+  const rows = document.getElementById("vaults-overview-rows");
+  box.hidden = !data.multi;
+  rows.innerHTML = "";
+  if (!data.multi) return;
+  data.vaults.forEach((v) => {
+    const row = document.createElement("div");
+    row.className = "vault-row" + (v.active ? " active" : "");
+    const rest = v.rest_key_set ? `🔌 ${v.rest_host}:${v.rest_port}` : "💾 direct file access";
+    row.innerHTML = `<span class="vname"></span><span class="vpath"></span><span class="vtag"></span>`;
+    row.querySelector(".vname").textContent = v.name;
+    row.querySelector(".vpath").textContent = v.path;
+    row.querySelector(".vtag").textContent = rest;
+    const btn = document.createElement("button");
+    btn.textContent = "Edit key";
+    btn.addEventListener("click", safe(async () => {
+      document.getElementById("adapter-vault").value = v.name;
+      await selectAdapterVault(v.name);
+      document.getElementById("adapter-key").focus();
+    }));
+    row.appendChild(btn);
+    rows.appendChild(row);
+  });
+}
+
+async function loadVaults() {
+  const data = await GET("/api/vaults");
+  const chip = document.getElementById("vault-chip");
+  const sel = document.getElementById("vault-select");
+  const adSel = document.getElementById("adapter-vault");
+  chip.hidden = !data.multi;
+  document.getElementById("adapter-vault-field").hidden = !data.multi;
+  [sel, adSel].forEach((el) => { el.innerHTML = ""; });
+  if (data.multi) {
+    data.vaults.forEach((v) => {
+      [sel, adSel].forEach((el) => {
+        const o = document.createElement("option");
+        o.value = v.name;
+        o.textContent = v.name + (v.description ? ` — ${v.description}` : "");
+        el.appendChild(o);
+      });
+    });
+    sel.value = data.active;
+    adSel.value = adapterVault && data.vaults.some((v) => v.name === adapterVault) ? adapterVault : data.active;
+    adapterVault = adSel.value;
+  } else {
+    adapterVault = null;
+  }
+  renderVaultsOverview(data);
+  return data;
+}
+
+async function selectAdapterVault(name) {
+  adapterVault = name;
+  document.getElementById("adapter-dot").className = "status-dot grey";
+  document.getElementById("adapter-status-text").textContent = "Not tested";
+  await loadAdapterSettings();
+}
+
+document.getElementById("vault-select").addEventListener("change", safe(async (e) => {
+  await PUT("/api/vaults/active", { name: e.target.value });
+  window.location.reload();           // every view is vault-specific; reload for a clean state
+}));
+
+document.getElementById("adapter-vault").addEventListener("change", safe(async (e) => {
+  await selectAdapterVault(e.target.value);
+}));
 
 // ── Notes view ─────────────────────────────────────────────────────
 async function loadNotes() {
@@ -496,10 +573,13 @@ async function loadPermissions() {
 
 // ── Settings view ──────────────────────────────────────────────────
 async function loadAdapterSettings() {
-  const s = await GET("/api/settings/adapter");
-  if (s.key_set) {
-    document.getElementById("adapter-key").placeholder = `Key set (${s.key_preview})`;
-  }
+  const s = await GET("/api/settings/adapter" + vaultQS());
+  const keyInput = document.getElementById("adapter-key");
+  adapterKeySet = !!s.key_set;
+  keyInput.value = "";                         // never carry one vault's typed key over to another
+  keyInput.placeholder = s.key_set
+    ? `Key set (${s.key_preview}) — leave empty to keep`
+    : "Paste your REST API key here…";
   document.getElementById("adapter-host").value = s.host;
   document.getElementById("adapter-port").value = s.port;
 }
@@ -522,8 +602,12 @@ document.getElementById("adapter-save-btn").addEventListener("click", safe(async
   const api_key = document.getElementById("adapter-key").value.trim();
   const host    = document.getElementById("adapter-host").value.trim() || "127.0.0.1";
   const port    = parseInt(document.getElementById("adapter-port").value) || 27123;
-  await PUT("/api/settings/adapter", { api_key, host, port });
-  toast("Connection settings saved.", "success");
+  // Empty box + a stored key = "keep it" (null). Only the Clear button sends "" to remove a key.
+  const keyToSend = api_key === "" && adapterKeySet ? null : api_key;
+  await PUT("/api/settings/adapter" + vaultQS(), { api_key: keyToSend, host, port });
+  toast(adapterVault ? `Saved connection for "${adapterVault}".` : "Connection settings saved.", "success");
+  await loadVaults();
+  await loadAdapterSettings();
   await loadStatus();
   await loadServerInfo();
 }));
@@ -533,7 +617,7 @@ document.getElementById("adapter-test-btn").addEventListener("click", safe(async
   const text = document.getElementById("adapter-status-text");
   dot.className  = "status-dot grey";
   text.textContent = "Testing…";
-  const res = await POST("/api/settings/adapter/test", {});
+  const res = await POST("/api/settings/adapter/test" + vaultQS(), {});
   dot.className  = `status-dot ${res.reachable ? "green" : "red"}`;
   text.textContent = res.reachable ? "Connected ✓" : `Unreachable — ${res.reason}`;
   toast(res.reachable ? "REST API reachable." : res.reason, res.reachable ? "success" : "error");
@@ -541,10 +625,12 @@ document.getElementById("adapter-test-btn").addEventListener("click", safe(async
 
 document.getElementById("adapter-clear-btn").addEventListener("click", safe(async () => {
   document.getElementById("adapter-key").value = "";
-  await PUT("/api/settings/adapter", { api_key: "", host: "127.0.0.1", port: 27123 });
+  await PUT("/api/settings/adapter" + vaultQS(), { api_key: "", host: "127.0.0.1", port: 27123 });
   document.getElementById("adapter-dot").className = "status-dot grey";
   document.getElementById("adapter-status-text").textContent = "Key cleared";
-  toast("API key cleared.", "success");
+  toast(adapterVault ? `API key cleared for "${adapterVault}".` : "API key cleared.", "success");
+  await loadVaults();
+  await loadAdapterSettings();
   await loadStatus();
 }));
 
@@ -625,6 +711,7 @@ document.getElementById("rule-presets").addEventListener("click", (e) => {
 // ── Initialise ─────────────────────────────────────────────────────
 (async () => {
   try {
+    await loadVaults();                        // decides single- vs multi-vault UI before anything else
     await Promise.all([
       loadStatus(),
       loadPermissions(),
