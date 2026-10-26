@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -112,9 +113,12 @@ class OmnisearchAliasRequest(BaseModel):
     aliases: list[str]
 
 class AdapterKeyRequest(BaseModel):
-    api_key: str
+    api_key: str | None = None      # None = keep the stored key; "" = clear it
     host: str = "127.0.0.1"
     port: int = 27123
+
+class ActiveVaultRequest(BaseModel):
+    name: str
 
 class RulesUpdateRequest(BaseModel):
     rules: str   # raw multiline text — one rule per line
@@ -125,8 +129,16 @@ class RulesUpdateRequest(BaseModel):
 def create_web_app(
     settings: ObsidianMCPSettings,
     vault_service: VaultService | None = None,
+    vault_registry: Any | None = None,
 ) -> FastAPI:
+    """Build the web UI.
+
+    With a ``vault_registry`` holding several vaults the UI works on the *active*
+    vault (``vault_service`` is then a ``VaultRouter``), offers a vault switcher,
+    and keeps one REST API key / host / port **per vault**.
+    """
     app = FastAPI(title="Obsidian MCP")
+    multi = vault_registry is not None and len(vault_registry) > 1
 
     vault      = vault_service or VaultService(settings.vault_path)
     knowledge  = KnowledgeService(vault)
@@ -174,70 +186,145 @@ def create_web_app(
 
     # ── Status ────────────────────────────────────────────────────────
 
+    def _vault_cfg(name: str | None):
+        """Resolve the vault an adapter-settings request is about (multi-vault only)."""
+        try:
+            return vault_registry.config(name or vault_registry.active_name)
+        except ApplicationError as exc:
+            raise HTTPException(status_code=404, detail=exc.to_public_dict()) from exc
+
+    def _adapter_view(name: str | None) -> dict[str, Any]:
+        if multi:
+            cfg = _vault_cfg(name)
+            return {"vault": cfg.name, "key": cfg.adapter_api_key, "host": cfg.adapter_host,
+                    "port": cfg.adapter_port, "mode": cfg.adapter_mode.value}
+        return {"vault": None, "key": _state["adapter_key"], "host": _state["adapter_host"],
+                "port": _state["adapter_port"], "mode": settings.adapter_mode.value}
+
+    def _vaults_payload() -> dict[str, Any]:
+        if multi:
+            return {"multi": True, "active": vault_registry.active_name,
+                    "vaults": vault_registry.list()}
+        return {"multi": False, "active": "default", "vaults": [{
+            "name": "default", "path": str(settings.vault_path), "description": "", "active": True,
+            "started": True, "rest_key_set": bool(_state["adapter_key"]),
+            "rest_host": _state["adapter_host"], "rest_port": _state["adapter_port"],
+            "adapter_mode": settings.adapter_mode.value}]}
+
+    # ── Vaults ────────────────────────────────────────────────────────
+
+    @app.get("/api/vaults")
+    def list_vaults():
+        """Configured vaults, which is active, and each vault's REST status (never the key)."""
+        return _vaults_payload()
+
+    @app.put("/api/vaults/active")
+    def set_active_vault(req: ActiveVaultRequest):
+        """Switch the vault the UI (and every API call below) works on."""
+        if not multi:
+            raise HTTPException(status_code=400, detail={"code": "single_vault",
+                                "message": "Only one vault is configured."})
+        try:
+            vault_registry.set_active(req.name)
+        except ApplicationError as exc:
+            raise HTTPException(status_code=404, detail=exc.to_public_dict()) from exc
+        return _vaults_payload()
+
+    # ── Status ────────────────────────────────────────────────────────
+
     @app.get("/api/status")
     def status():
-        adapter_name = "unknown"
-        if hasattr(vault, "_adapter"):
-            adapter_name = type(vault._adapter).__name__
-        return {
+        adapter_name, vault_error = "unknown", None
+        try:
+            if hasattr(vault, "_adapter"):
+                adapter_name = type(vault._adapter).__name__
+        except Exception as exc:          # active vault could not start (e.g. REST-only, Obsidian closed)
+            adapter_name, vault_error = "unavailable", str(exc)
+        view = _adapter_view(None)
+        out = {
             "server_name": settings.server_name,
-            "vault_path": str(settings.vault_path),
+            "vault_path": str(vault_registry.config(vault_registry.active_name).path) if multi
+                          else str(settings.vault_path),
             "permission_profile": _state["profile"].value,
             "adapter": adapter_name,
-            "adapter_key_set": bool(_state["adapter_key"]),
-            "adapter_host": _state["adapter_host"],
-            "adapter_port": _state["adapter_port"],
+            "adapter_key_set": bool(view["key"]),
+            "adapter_host": view["host"],
+            "adapter_port": view["port"],
         }
+        if multi:
+            out.update(vault=vault_registry.active_name, vault_count=len(vault_registry))
+        if vault_error:
+            out["vault_error"] = vault_error
+        return out
 
-    # ── Settings: REST API key ─────────────────────────────────────────
+    # ── Settings: REST API key (per vault when several are configured) ──
 
     @app.get("/api/settings/adapter")
-    def get_adapter_settings():
-        """Return current adapter config (key masked)."""
-        key = _state["adapter_key"]
+    def get_adapter_settings(vault_name: str | None = Query(default=None, alias="vault")):
+        """Return a vault's adapter config (key masked)."""
+        view = _adapter_view(vault_name)
+        key = view["key"]
         masked = ("*" * (len(key) - 4) + key[-4:]) if len(key) > 4 else ("*" * len(key))
         return {
+            "vault": view["vault"],
             "key_set": bool(key),
             "key_preview": masked if key else "",
-            "host": _state["adapter_host"],
-            "port": _state["adapter_port"],
-            "mode": settings.adapter_mode.value,
+            "host": view["host"],
+            "port": view["port"],
+            "mode": view["mode"],
         }
 
     @app.put("/api/settings/adapter")
-    def update_adapter_settings(req: AdapterKeyRequest):
-        """Save REST API plugin connection details."""
+    def update_adapter_settings(
+        req: AdapterKeyRequest,
+        vault_name: str | None = Query(default=None, alias="vault"),
+    ):
+        """Save REST API plugin connection details for one vault."""
         _require(PermissionAction.SETTINGS_UPDATE_ADAPTER_KEY)
-        _state["adapter_key"]  = req.api_key
+        if multi:
+            cfg = _vault_cfg(vault_name)
+            try:
+                updated = vault_registry.update_adapter(
+                    cfg.name,
+                    api_key=req.api_key,        # None keeps the stored key
+                    host=req.host,
+                    port=req.port,
+                )
+            except ValueError as exc:           # e.g. two vaults would share one REST port
+                raise HTTPException(status_code=400, detail={
+                    "code": "invalid_vault_settings", "message": str(exc)}) from exc
+            _persist_vaults_env(vault_registry.configs())
+            return {"saved": True, "vault": updated.name, "key_set": bool(updated.adapter_api_key),
+                    "host": updated.adapter_host, "port": updated.adapter_port}
+        new_key = _state["adapter_key"] if req.api_key is None else req.api_key
+        _state["adapter_key"]  = new_key
         _state["adapter_host"] = req.host
         _state["adapter_port"] = req.port
         # Persist to .env (best-effort)
-        _persist_adapter_env(req.api_key, req.host, req.port)
+        _persist_adapter_env(new_key, req.host, req.port)
         return {
             "saved": True,
-            "key_set": bool(req.api_key),
+            "key_set": bool(new_key),
             "host": req.host,
             "port": req.port,
         }
 
     @app.post("/api/settings/adapter/test")
-    def test_adapter_connection():
-        """Probe the configured REST API endpoint."""
+    def test_adapter_connection(vault_name: str | None = Query(default=None, alias="vault")):
+        """Probe one vault's configured REST API endpoint."""
         _require(PermissionAction.SETTINGS_UPDATE_ADAPTER_KEY)
-        if not _state["adapter_key"]:
-            return {"reachable": False, "reason": "No API key configured."}
+        view = _adapter_view(vault_name)
+        if not view["key"]:
+            return {"vault": view["vault"], "reachable": False, "reason": "No API key configured."}
         try:
             from obsidian_mcp.adapters.rest_api import RestApiAdapter
-            probe = RestApiAdapter(
-                _state["adapter_key"],
-                _state["adapter_host"],
-                _state["adapter_port"],
-            )
+            probe = RestApiAdapter(view["key"], view["host"], view["port"])
             reachable = probe.health_check()
             probe.close()
-            return {"reachable": reachable, "reason": "OK" if reachable else "Connection refused."}
+            return {"vault": view["vault"], "reachable": reachable,
+                    "reason": "OK" if reachable else "Connection refused."}
         except Exception as exc:
-            return {"reachable": False, "reason": str(exc)}
+            return {"vault": view["vault"], "reachable": False, "reason": str(exc)}
 
     # ── AI Rules ──────────────────────────────────────────────────────
 
@@ -526,6 +613,32 @@ def _build_system_prompt(rules: str) -> str:
 
 
 # ── .env persistence helper ───────────────────────────────────────────
+
+def _persist_vaults_env(configs: list[Any]) -> None:
+    """Best-effort: write every vault (with its own REST settings) to ``OBSIDIAN_MCP_VAULTS`` in .env.
+
+    Paths are written with forward slashes so the JSON has no backslashes — python-dotenv
+    treats ``\\`` inside single-quoted values as an escape, which would corrupt Windows paths.
+    """
+    env_path = Path(".env")
+    payload = [
+        {
+            "name": c.name, "path": c.path.as_posix(), "description": c.description,
+            "adapter_mode": c.adapter_mode.value, "adapter_api_key": c.adapter_api_key,
+            "adapter_host": c.adapter_host, "adapter_port": c.adapter_port,
+        }
+        for c in configs
+    ]
+    value = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).replace("'", "\\'")
+    line = f"OBSIDIAN_MCP_VAULTS='{value}'"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        lines = [ln for ln in lines if not ln.startswith("OBSIDIAN_MCP_VAULTS=")]
+        lines.append(line)
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
 
 def _persist_adapter_env(api_key: str, host: str, port: int) -> None:
     """Best-effort: update OBSIDIAN_MCP_ADAPTER_* lines in .env."""

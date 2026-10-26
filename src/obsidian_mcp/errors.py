@@ -16,6 +16,7 @@ class ErrorCode(StrEnum):
     PERMISSION_DENIED = "permission_denied"
     STRING_NOT_FOUND = "string_not_found"
     STRING_NOT_UNIQUE = "string_not_unique"
+    VAULT_NOT_FOUND = "vault_not_found"
 
 
 class PublicErrorPayload(TypedDict):
@@ -133,4 +134,15 @@ class StringNotUniqueError(ApplicationError):
             code=ErrorCode.STRING_NOT_UNIQUE,
             message=message,
             internal_detail=internal_detail,
+        )
+
+
+class UnknownVaultError(ApplicationError):
+    """Raised when a tool or setting names a vault that is not configured."""
+
+    def __init__(self, name: str, available: list[str]) -> None:
+        listing = ", ".join(available) or "(none)"
+        super().__init__(
+            code=ErrorCode.VAULT_NOT_FOUND,
+            message=f"Unknown vault {name!r}. Available vaults: {listing}.",
         )
