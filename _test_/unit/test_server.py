@@ -29,3 +29,12 @@ def test_startup_path_builds_a_server_from_the_environment(
 
     assert getattr(server, "name") == "obsidian-mcp"
     assert vault_service.resolver.vault_path == tmp_path.resolve()
+
+
+def test_bundled_icon_exists_and_loads() -> None:
+    """icon.png was referenced by server.py, pyproject and the wizard but never committed;
+    _load_icon() swallows the error, so the icon silently disappeared on fresh clones."""
+    import obsidian_mcp.server as srv
+
+    assert (Path(srv.__file__).parent / "icon.png").is_file()
+    assert srv._load_icon() is not None
