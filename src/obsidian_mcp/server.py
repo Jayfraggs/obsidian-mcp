@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 import base64
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Icon
 
 from obsidian_mcp.config import ObsidianMCPSettings
+from obsidian_mcp.logging import get_logger
+from obsidian_mcp.vault.registry import VaultRegistry
+from obsidian_mcp.vault.service import VaultService
 
 # Load and encode the bundled icon once at import time.
 # Stored as a 96×96 PNG alongside this module.
@@ -29,9 +31,6 @@ def _load_icon() -> Icon | None:
         return None
 
 _ICON = _load_icon()
-from obsidian_mcp.logging import get_logger
-from obsidian_mcp.vault.registry import VaultRegistry
-from obsidian_mcp.vault.service import VaultService
 
 ToolRegistrar = Callable[..., None]
 logger = get_logger("server")
@@ -42,7 +41,6 @@ def create_server(
     tool_registrars: tuple[ToolRegistrar, ...] = (),
     vault_service: VaultService | None = None,
     system_prompt: str | None = None,
-    vault_registry: "VaultRegistry | None" = None,
 ) -> FastMCP:
     """Create and configure the MCP server instance.
 
@@ -58,45 +56,21 @@ def create_server(
     system_prompt:
         Optional instructions injected as the server-level system prompt.
         Used to carry vault rules into every LLM session.
-    vault_registry:
-        Registry of configured vaults.  When it holds more than one vault the
-        server becomes multi-vault: every tool gains an optional ``vault``
-        argument, ``vault_list`` / ``vault_switch`` / ``vault_status`` are added,
-        and the tool groups are handed a router that targets the active vault.
-        With one vault (or None) behaviour is exactly the single-vault one.
     """
-    multi = vault_registry is not None and len(vault_registry) > 1
-    instructions = system_prompt or _default_instructions()
-    if multi:
-        instructions = f"{instructions}\n\n{vault_registry.prompt_block()}"
     # FastMCP accepts instructions= as the server-level system prompt
     server = FastMCP(
         settings.server_name,
-        instructions=instructions,
+        instructions=system_prompt or _default_instructions(),
         icons=[_ICON] if _ICON is not None else None,
     )
-    registrar_server: Any = server
-    if multi:
-        from obsidian_mcp.tools.multivault import VaultAwareServer, register_vault_tools
-        from obsidian_mcp.vault.registry import VaultRouter
-
-        vault_service = VaultRouter(vault_registry)          # type: ignore[assignment]
-        registrar_server = VaultAwareServer(server, vault_registry)
-        register_vault_tools(server, vault_registry)
-        logger.info("Multi-vault mode: %s", ", ".join(vault_registry.names()))
     for registrar in tool_registrars:
-        registrar(registrar_server, settings, vault_service=vault_service)
+        registrar(server, settings, vault_service=vault_service)
     logger.debug("Created MCP server '%s'.", settings.server_name)
     return server
 
 
-def _default_instructions() -> str:
-    return (
-        "You are an Obsidian vault assistant. Use the available tools to read, "
-        "create, and update notes. Always prefer atomic notes (one idea per file), "
-        "use [[wikilinks]] for internal references, and add proper YAML frontmatter "
-        "to every note you create."
-    )
+
+
 def _default_instructions() -> str:
     return (
         "You are an expert Obsidian knowledge-management assistant. Think in terms "
@@ -109,10 +83,7 @@ def _default_instructions() -> str:
         "well-linked knowledge rather than conversation-specific text. Use "
         "Dataview-friendly metadata, Tasks syntax for actionable items, Kanban for "
         "project planning, and generate Excalidraw diagrams when explaining systems, "
-        "architectures, workflows, or relationships. For Excalidraw never write "
-        "drawing JSON or .excalidraw.md files yourself: call excalidraw_get_schema "
-        "once, then excalidraw_create_diagram (or excalidraw_generate_flowchart) with "
-        "nodes and arrows, and excalidraw_edit_diagram to change one. Preserve the vault's existing "
+        "architectures, workflows, or relationships. Preserve the vault's existing "
         "organization and respond with a concise summary of changes after completing "
         "the requested operations."
     )
