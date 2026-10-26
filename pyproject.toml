@@ -12,7 +12,9 @@ license = { text = "MIT" }
 keywords = ["obsidian", "mcp", "knowledge-management", "claude", "llm"]
 
 dependencies = [
-    "mcp>=1.0.0",
+    # 2.x removed mcp.server.fastmcp (FastMCP); 1.22 is the oldest release verified with the
+    # Icon API this server uses against current pydantic.
+    "mcp>=1.22,<2",
     "fastmcp>=0.1.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -64,4 +66,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["_test_"]
+# Several test modules share a basename (test_service.py, ...) without __init__.py files;
+# importlib mode avoids "import file mismatch" collection errors.
+addopts = "--import-mode=importlib"
