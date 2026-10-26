@@ -78,7 +78,12 @@ def test_build_relationship_graph_uses_links_and_tags() -> None:
         {"id": "B.md", "title": "B", "tags": ["x"]},
     ]
     assert {"source": "A.md", "target": "B.md", "type": "link"} in graph["edges"]
-    assert {"source": "A.md", "target": "B.md", "type": "tag", "tag": "x"} in graph["edges"]
+    # Shared-tag edges grow ~quadratically, so they are opt-in (see build_relationship_graph docs).
+    assert not any(e["type"] == "tag" for e in graph["edges"])
+
+    with_tags = build_relationship_graph(docs, include_tag_edges=True)
+    assert {"source": "A.md", "target": "B.md", "type": "tag", "tag": "x"} in with_tags["edges"]
+    assert {"source": "A.md", "target": "B.md", "type": "link"} in with_tags["edges"]
 
 
 def test_build_dataview_dashboard_contains_expected_query_blocks() -> None:

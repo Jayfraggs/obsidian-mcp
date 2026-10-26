@@ -84,6 +84,7 @@ def test_backlinks_include_notes_linking_to_target(tmp_path: Path) -> None:
     service.create_note("Source", "Links to [[Target]]")
     service.create_note("Other", "Links to [[Elsewhere]]")
 
-    read = service.read_note("Target")
+    assert service.read_note("Target")["backlinks"] == []          # opt-in: default skips the lookup
+    read = service.read_note("Target", include_backlinks=True)
 
     assert read["backlinks"] == ["Source.md"]

@@ -14,14 +14,18 @@ def test_create_server_uses_configured_name(tmp_path: Path) -> None:
     assert getattr(server, "name") == "test-server"
 
 
-def test_build_server_returns_configured_server(
+def test_startup_path_builds_a_server_from_the_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from obsidian_mcp.__main__ import build_server
+    """What `python -m obsidian_mcp` does: environment -> settings -> vault service -> server."""
+    from obsidian_mcp.__main__ import _build_vault_service
 
+    monkeypatch.chdir(tmp_path)                    # no stray .env
     monkeypatch.setenv("OBSIDIAN_MCP_VAULT_PATH", str(tmp_path))
 
-    server = build_server()
+    settings, vault_service, _ = _build_vault_service()
+    server = create_server(settings, vault_service=vault_service)
 
     assert getattr(server, "name") == "obsidian-mcp"
+    assert vault_service.resolver.vault_path == tmp_path.resolve()
