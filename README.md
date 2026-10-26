@@ -23,6 +23,7 @@ plugin-native markdown that Obsidian can read and render without any extra confi
 6. [Connect to other LLMs](#connect-to-other-llms)
 7. [Web UI](#web-ui)
 8. [Obsidian Local REST API plugin (optional)](#obsidian-local-rest-api-plugin)
+   - [Multiple vaults](#multiple-vaults)
 9. [AI Rules system](#ai-rules-system)
 10. [Plugin reference](#plugin-reference)
 11. [Vault adapter modes](#vault-adapter-modes)
@@ -440,6 +441,64 @@ OBSIDIAN_MCP_ADAPTER_PORT=27123
 
 The server will probe the REST API at startup. If Obsidian is running and the
 key is valid it uses the live API; otherwise it falls back to direct file access.
+
+---
+
+## Multiple vaults
+
+One server can work with several Obsidian vaults. A single vault keeps working
+exactly as before — nothing below is needed unless you have more than one.
+
+### Configure
+
+**Shorthand** (direct file access — simplest):
+
+```env
+OBSIDIAN_MCP_VAULTS=work=C:/Vaults/Work;personal=C:/Vaults/Personal
+OBSIDIAN_MCP_DEFAULT_VAULT=work        # optional; default is the first one
+```
+
+**JSON** (per-vault description and REST API settings):
+
+```env
+OBSIDIAN_MCP_VAULTS='[{"name":"work","path":"C:/Vaults/Work","description":"Client projects","adapter_api_key":"KEY-FROM-WORK-VAULT","adapter_port":27123},{"name":"personal","path":"C:/Vaults/Personal","adapter_api_key":"KEY-FROM-PERSONAL-VAULT","adapter_port":27125}]'
+```
+
+Names are 1–48 letters, digits, `-`, `_` or `.` (no spaces) and are case-insensitive.
+The setup wizard and the Web UI write this for you. An existing
+`OBSIDIAN_MCP_VAULT_PATH` still works and becomes the vault named `default`.
+
+### One REST API key per vault
+
+**Every Obsidian vault runs its own Local REST API plugin**, so each vault has
+its own API key and must listen on its own port (Obsidian → Settings → Local REST
+API → port; the plugin defaults to 27123 HTTP / 27124 HTTPS, so use e.g. 27125,
+27127 for further vaults). Adapter settings are **never shared or inherited between
+vaults** — sharing one key would send reads and writes to the wrong vault. The
+server refuses to start if two vaults use the same REST endpoint, and a vault with
+no key simply uses direct file access. Only the legacy `OBSIDIAN_MCP_VAULT_PATH`
+vault uses the global `OBSIDIAN_MCP_ADAPTER_*` settings.
+
+### How the AI uses them
+
+- Tools act on the **active vault**. Every tool also accepts an optional
+  `vault="name"` argument for a one-off call, and every result carries a `vault`
+  field showing where it ran.
+- `vault_list`, `vault_switch`, `vault_status` list vaults, change the active one
+  (for the rest of the session) and check health.
+- Only the default vault is opened at startup; the others start on first use, so a
+  vault whose Obsidian is closed can't stop the server from launching.
+- Notes can't be moved between vaults with `move_note`; read the note, then
+  `create_note(vault=...)`.
+
+### Web UI and setup wizard
+
+With several vaults the Web UI shows a **Vault** switcher in the top bar, and
+*Settings → Obsidian Local REST API* edits the key, host and port of the vault you
+pick in its own dropdown (an overview lists every vault's connection). An empty key
+box keeps the stored key; only **Clear key** removes it. The setup wizard has an
+**Add another vault** button with a name, folder, API key and port per vault.
+`python -m obsidian_mcp check` reports each vault and its adapter separately.
 
 ---
 

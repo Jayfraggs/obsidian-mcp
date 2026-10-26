@@ -30,6 +30,7 @@ def _load_icon() -> Icon | None:
 
 _ICON = _load_icon()
 from obsidian_mcp.logging import get_logger
+from obsidian_mcp.vault.registry import VaultRegistry
 from obsidian_mcp.vault.service import VaultService
 
 ToolRegistrar = Callable[..., None]
@@ -41,6 +42,7 @@ def create_server(
     tool_registrars: tuple[ToolRegistrar, ...] = (),
     vault_service: VaultService | None = None,
     system_prompt: str | None = None,
+    vault_registry: "VaultRegistry | None" = None,
 ) -> FastMCP:
     """Create and configure the MCP server instance.
 
@@ -56,15 +58,34 @@ def create_server(
     system_prompt:
         Optional instructions injected as the server-level system prompt.
         Used to carry vault rules into every LLM session.
+    vault_registry:
+        Registry of configured vaults.  When it holds more than one vault the
+        server becomes multi-vault: every tool gains an optional ``vault``
+        argument, ``vault_list`` / ``vault_switch`` / ``vault_status`` are added,
+        and the tool groups are handed a router that targets the active vault.
+        With one vault (or None) behaviour is exactly the single-vault one.
     """
+    multi = vault_registry is not None and len(vault_registry) > 1
+    instructions = system_prompt or _default_instructions()
+    if multi:
+        instructions = f"{instructions}\n\n{vault_registry.prompt_block()}"
     # FastMCP accepts instructions= as the server-level system prompt
     server = FastMCP(
         settings.server_name,
-        instructions=system_prompt or _default_instructions(),
+        instructions=instructions,
         icons=[_ICON] if _ICON is not None else None,
     )
+    registrar_server: Any = server
+    if multi:
+        from obsidian_mcp.tools.multivault import VaultAwareServer, register_vault_tools
+        from obsidian_mcp.vault.registry import VaultRouter
+
+        vault_service = VaultRouter(vault_registry)          # type: ignore[assignment]
+        registrar_server = VaultAwareServer(server, vault_registry)
+        register_vault_tools(server, vault_registry)
+        logger.info("Multi-vault mode: %s", ", ".join(vault_registry.names()))
     for registrar in tool_registrars:
-        registrar(server, settings, vault_service=vault_service)
+        registrar(registrar_server, settings, vault_service=vault_service)
     logger.debug("Created MCP server '%s'.", settings.server_name)
     return server
 
