@@ -56,7 +56,7 @@ Prompt 3 local advanced tools are implemented with:
 - Deterministic local semantic-style search.
 - Duplicate detection.
 - Relationship graph generation.
-- Excalidraw architecture note generation.
+- Excalidraw diagram engine: skeleton → valid scene, validate/repair, edit, compressed-drawing reads, write guard (see `DOCS/features/excalidraw-diagrams.md`).
 - MCP registration through `obsidian_mcp.tools.knowledge.register_knowledge_tools`.
 
 Prompt 3 local permissions and Web UI are implemented with:
@@ -66,6 +66,14 @@ Prompt 3 local permissions and Web UI are implemented with:
 - FastAPI Web API and static Web UI served by `obsidian-mcp-web`.
 
 Deferred Prompt 3 platform features remain SQLite metadata cache, multi-user authentication, remote deployment permissions, and remote embedding-backed search.
+
+## Excalidraw Diagram Engine
+
+- The LLM never writes drawing JSON: it sends nodes + arrows and `plugins/excalidraw_scene.py` builds the scene (bound labels, two-way bindings, 8-char text ids, auto layout, curved routing around obstacles).
+- `create_note`/`update_note` on `*.excalidraw.md` are validated and repaired (or rejected with guidance); `append_note`/`str_replace_note` refuse drawings.
+- Reads plain and `compressed-json`; edits preserve frontmatter, user markdown and embedded files.
+- Not verified in a live Obsidian during development (structural validation, round trips and rendered checks only). The Excalidraw CLI is deliberately not used.
+- Feature doc: `DOCS/features/excalidraw-diagrams.md`.
 
 ## Current Maintenance Notes
 

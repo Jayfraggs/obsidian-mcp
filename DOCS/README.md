@@ -5,6 +5,7 @@ Internal technical references for contributors and anyone extending the server.
 | Doc | What it covers |
 |-----|---------------|
 | [backlink-index.md](backlink-index.md) | `BacklinkIndex` architecture, cold-start persistence, watchdog live updates, thread safety, performance characteristics, logging reference |
+| [features/excalidraw-diagrams.md](features/excalidraw-diagrams.md) | Excalidraw tools: skeleton format, create/edit/validate, repair of hand-written drawings, file format, limits |
 | [codebase_reference.md](codebase_reference.md) | Full function and class registry for every module |
 | [development.md](development.md) | Dev setup, running the tests, pytest configuration, dependency policy, intentional behaviours, path-safety contract |
 | [setup-wizard.md](setup-wizard.md) | Setup wizard and server launcher architecture, module reference, thread model, testing guide, `.env` field reference |

@@ -123,7 +123,7 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 - `suggest_tags(document: NoteDocument, existing_tags: list[str], limit: int = 5) -> list[dict[str, Any]]`: suggests tags.
 - `build_relationship_graph(documents: list[NoteDocument]) -> dict[str, list[dict[str, Any]]]`: builds relationship graph nodes and edges.
 - `build_dataview_dashboard(title: str, tags: list[str]) -> str`: generates Dataview-compatible dashboard markdown.
-- `generate_excalidraw_markdown(title: str, graph: dict[str, list[dict[str, Any]]]) -> str`: generates Excalidraw-compatible markdown.
+- `generate_excalidraw_markdown(title: str, graph: dict[str, list[dict[str, Any]]]) -> str`: generates an Excalidraw note for a relationship graph via `plugins.excalidraw_scene` (nodes carry bound text labels, edges are bound arrows, tag edges are labelled `#tag`). The previous version put `text` on the rectangle, which Excalidraw ignores, so labels were lost.
 
 ### `obsidian_mcp.knowledge.service`
 
@@ -165,6 +165,37 @@ Prompt 1 foundation, Prompt 2 core tools, and Prompt 3 local advanced tools have
 - `DashboardRequest`: API model for Dataview dashboard creation.
 
 ---
+
+### `obsidian_mcp.plugins.excalidraw_scene` (2026-10-26)
+
+Pure scene engine — no vault access. See `DOCS/features/excalidraw-diagrams.md`.
+
+- Constants: `SHAPE_TYPES`, `ARROW_TYPES`, `KNOWN_TYPES`, `ID_LEN` (8), `BIND_GAP` (8), `GAP_MAIN`/`GAP_CROSS`, `WRAP_CHARS`, `DEFAULT_FONT_FAMILY` (3), `DEFAULT_FONT_SIZE` (16).
+- `SkeletonError(problems: list[str])`: raised with **every** problem found in a skeleton.
+- `Issue`, `BuildResult(elements, ids, warnings)`, `ParsedDrawing(payload, compressed, error)`: result records; `Issue.to_dict()`.
+- `build_elements(skeleton, *, existing=None, direction="TB", layout="layered", origin=None) -> BuildResult`: skeleton (nodes + arrows, coordinates optional, aliases `from`/`to`/`text`) → complete elements: bound labels, two-way arrow bindings, relative points, 8-char ids, auto layout, obstacle-avoiding curved arrows. `existing` elements are valid arrow targets and are mutated in place.
+- `layered_layout(ids, edges, sizes, direction="TB", gap_main=GAP_MAIN)`, `grid_layout`, `radial_layout`: top-left positions; layered tolerates cycles and reduces crossings (barycentre sweeps).
+- `set_label(elements, shape, text)`: set/create a bound label; grows the shape if needed.
+- `scene_payload(elements)`, `bounds(elements)`: scene wrapper and bounding box.
+- `validate_scene(payload) -> list[Issue]`: pure; codes are listed in the feature doc.
+- `repair_scene(payload) -> (payload, changes)`: deep-copies, fixes everything fixable (inline labels → bound text, two-way bindings, defaults, relative points, dangling refs, 8-char text ids); keeps unknown element types untouched.
+- `summarize_scene(payload) -> dict`: compact `nodes` / `connections` / `free_text` view.
+- `lz_decompress_base64(data) -> str | None`: LZString port (UTF-16 surrogate pairs recombined); verified against the JS library.
+- `parse_drawing(content) -> ParsedDrawing`: plain `json`, `compressed-json`, bare scene JSON or a legacy bare block.
+- `build_drawing_file(title, payload) -> str`: canonical file (frontmatter, `# Excalidraw Data`, `## Text Elements`, `## Drawing`).
+- `rewrite_drawing_file(original, payload) -> str`: replaces only the Text Elements and Drawing sections, preserving frontmatter, user markdown and `## Embedded Files`. `ensure_plugin_frontmatter(content)`.
+- Helpers: `make_id`, `wrap_label`, `measure_text`, `_edge_point`, `_blocked`, `_route_around`, `_layer_gap`.
+
+### `obsidian_mcp.plugins.excalidraw` (2026-10-26, rewritten)
+
+- `is_drawing_path(path) -> bool`, `DRAWING_SUFFIX`, `GUIDANCE`, `SCHEMA`.
+- `ExcalidrawService`: `get_schema()`, `create_diagram(path, title, elements, *, direction, layout, overwrite)`, `generate_flowchart(path, title, steps, ...)`, `generate_architecture(...)`, `generate_concept_map(...)`, `parse_elements(path, *, compact=False)`, `validate_drawing(path, *, repair=False)`, `edit_diagram(path, *, add, remove_ids, update, direction)` (all-or-nothing), `add_text_annotation(...)`, `write_raw(path, content, *, mode)` (repairs or rejects hand-written drawings), `blocked_edit(op)`. Creation methods return `{ok, written?, error?, problems?, hint?}`-style dicts and never echo the note body. Unchanged: `install_scripts`, `list_bundled_scripts`, `write_ea_script`, `embed_in_note`.
+
+### Excalidraw tool wiring (2026-10-26)
+
+- `obsidian_mcp.tools.plugins`: adds `excalidraw_get_schema`, `excalidraw_create_diagram`, `excalidraw_generate_flowchart`, `excalidraw_edit_diagram`, `excalidraw_validate`; `excalidraw_parse_elements` gains `compact`; generator tools gain `overwrite`.
+- `obsidian_mcp.tools.core`: `create_note` / `update_note` route `*.excalidraw.md` through `ExcalidrawService.write_raw`; `append_note` / `str_replace_note` refuse drawings.
+- `obsidian_mcp.web.app._TOOL_GUIDANCE`: appended to the runtime system prompt so the model does not hand-write drawing JSON.
 
 ## Setup & Launcher Scripts (repo root)
 

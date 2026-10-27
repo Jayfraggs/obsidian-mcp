@@ -692,6 +692,8 @@ layer for interactive editing after the AI generates the initial diagram.
 
 **Layouts:** `layered` (follows the arrows; `TB` or `LR`) · `grid` · `radial`
 
+Full reference: [DOCS/features/excalidraw-diagrams.md](DOCS/features/excalidraw-diagrams.md).
+
 #### Why the AI never writes diagram JSON
 
 LLMs routinely emit Excalidraw JSON that looks right but is broken: labels put
